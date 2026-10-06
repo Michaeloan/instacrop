@@ -1,0 +1,10 @@
+.runtime/
+.venv/
+__pycache__/
+*.pyc
+build/
+release/
+outputs/
+.env*
+*.polascan
+.tmp/
