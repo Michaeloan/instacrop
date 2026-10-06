@@ -78,7 +78,7 @@ window.Workspace = (() => {
       if($("editDialog").open){status("请先完成或取消当前照片调整，再保存整个批次。");return;}
       const data={photo_ids:ids(all)};
       if(native()?.save_workspace){const result=await native().save_workspace(kind,data);if(result.cancelled){status("已取消保存。");return;}track(result);}
-      else {const path=kind==="project"?"/api/workspace/project-save":"/api/workspace/export";track(await request(path,{...data,zip_output:true}),true);}
+      else {const path=kind==="project"?"/api/workspace/project-save":"/api/workspace/export";track(await request(path,{...data,zip_output:kind!=="folder"}),kind!=="folder");}
       status("后台正在保存；照片仍可查看和调整。");
     }catch(error){status(error.message);}
   }
@@ -104,6 +104,8 @@ window.Workspace = (() => {
       if(["running","queued"].includes(task.state)){control("pause","暂停后续");control("cancel","取消");}
       if(task.state==="paused"){control("resume","继续");control("cancel","取消");}
       if(["failed","partial","interrupted"].includes(task.state))control("retry","重试失败项");
+      const folderResult=Array.isArray(task.results)?task.results.find(item=>item?.result?.path && !item.result.artifact_id)?.result:task.results;
+      if(folderResult?.path && !artifact(task)){const location=document.createElement("p");location.textContent="照片已保存到："+folderResult.path;label.append(location);}
       const art=artifact(task);if(art){const link=document.createElement("a");link.href="/api/artifacts/"+encodeURIComponent(art)+"?token="+encodeURIComponent(token);link.textContent="下载结果";link.setAttribute("download","");actions.append(link);if(downloads.has(task.id)&&!downloaded.has(task.id)){downloaded.add(task.id);link.click();}}
       row.append(label,actions);list.append(row);
     });
@@ -138,7 +140,7 @@ window.Workspace = (() => {
   $("folderFiles").onchange=()=>run(async()=>{const files=Array.from($("folderFiles").files).filter(file=>file.webkitRelativePath.split("/").length===2);await importFiles(files,importKind);$("folderFiles").value="";});
   document.body.addEventListener("dragover",event=>{if($("editDialog").open)return;event.preventDefault();document.body.classList.add("dragging");});
   document.body.addEventListener("drop",event=>{if($("editDialog").open)return;event.preventDefault();event.stopImmediatePropagation();document.body.classList.remove("dragging");run(()=>importFiles(event.dataTransfer.files,importKind));},true);
-  $("export").onclick=()=>save("export");$("exportAll").onclick=()=>save("export",true);$("exportFolder").onclick=()=>save("folder");$("saveProject").onclick=()=>save("project");
+  $("export").onclick=()=>save("folder");$("exportAll").onclick=()=>save("folder",true);$("exportFolder").onclick=()=>save("export");$("saveProject").onclick=()=>save("project");
   $("openProject").onclick=()=>run(async()=>{if($("editDialog").open)throw new Error("请先完成或取消当前照片调整。");if(native()?.open_workspace_project){const result=await native().open_workspace_project();if(result.error)throw new Error(result.error);if(!result.cancelled)install(result.workspace || result);}else $("projectFile").click();});
   $("projectFile").onchange=()=>run(async()=>{const file=$("projectFile").files[0];if(!file)return;install(await request("/api/workspace/project-open",file,true));$("projectFile").value="";status("整批项目已恢复。");});
   $("newBatch").onclick=()=>run(async()=>{if(!confirm("新建批次会关闭当前工作区。请先保存未保存的项目。继续？"))return;install(await request("/api/workspace/new",{}));scan=null;undoToken=null;$("batchUndo").disabled=true;status("已新建空批次。");});

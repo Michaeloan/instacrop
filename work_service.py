@@ -129,7 +129,7 @@ class WorkService:
             raise ValueError("未知保存类型")
         internal = destination is None
         if internal:
-            destination = self.outputs / (secrets.token_hex(8) + (".polascan" if kind == "project" else ".zip"))
+            destination = self.outputs / (secrets.token_hex(8) + (".polascan" if kind == "project" else ".zip" if kind == "export" else ""))
         destination = Path(destination)
         def worker(_, cancel, progress):
             if kind == "project":
@@ -146,7 +146,7 @@ class WorkService:
             if cancel.is_set():
                 return {"cancelled": True}
             actual_path = Path(report.get("path", destination))
-            result = self.artifact(actual_path, report) if internal and kind != "folder" else {"filename": actual_path.name, "report": report}
+            result = self.artifact(actual_path, report) if internal and kind != "folder" else {"filename": actual_path.name, "path": str(actual_path.resolve()), "report": report}
             if report.get("failed"):
                 # Preserve completed results and show partial status at task level.
                 result["partial"] = True
@@ -178,7 +178,7 @@ class WorkService:
                 raise ValueError("先取消或完成当前任务，再创建新批次")
             ws.new(); return self.snapshot()
         if path == "/api/workspace/export":
-            return self.save("export", data)
+            return self.save("folder" if data.get("zip_output") is False else "export", data)
         if path == "/api/workspace/project-save":
             return self.save("project", data)
         if path == "/api/tasks/control":
