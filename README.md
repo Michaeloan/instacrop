@@ -10,7 +10,7 @@
 
 [📦 下载 Windows 版](https://github.com/Michaeloan/instacrop/releases/latest)　｜　[🌷 第一次使用](#-第一次使用跟着这-5-步走)　｜　[💬 常见问题](#-你可能想问)
 
-![林间蓝水的照片画面成图](docs/images/landscape-hero.jpg)
+<a href="docs/images/landscape-hero.jpg"><img src="docs/images/landscape-hero.jpg" alt="林间蓝水的照片画面成图" width="300"></a>
 
 <sub>林间蓝水 · 照片画面导出</sub>
 
@@ -36,7 +36,9 @@
 
 金绿的树叶、横过画面的枝条、清透的蓝色水面，是这张风景相纸最喜欢的几个细节。
 
-![林间蓝水实际照片画面导出](docs/images/forest-detail.jpg)
+<p align="center">
+<a href="docs/images/forest-detail.jpg"><img src="docs/images/forest-detail.jpg" alt="林间蓝水实际照片画面导出" width="340"></a>
+</p>
 
 在 InstaCrop 中确认画面四角，修整左侧边缘，再导出照片画面。去掉多余的边缘后，树林与水面的层次更集中，适合放进电子相册，也适合分享给朋友。
 
@@ -91,13 +93,17 @@
 
 ### 照片列表：先看全貌，再挑需要调整的那张
 
-![InstaCrop 实际照片列表界面](docs/images/workspace-gallery.jpg)
+<p align="center">
+<a href="docs/images/workspace-gallery.jpg"><img src="docs/images/workspace-gallery.jpg" alt="InstaCrop 实际照片列表界面" width="520"></a>
+</p>
 
 导入后，照片按来源进入列表。上方切换「带白边」「只看画面」「背景成图」，下方选择照片；待检查清单让需要复核的结果集中出现。确定要保留哪些，再一起导出。
 
 ### 裁剪界面：在原扫描图上，把四个角放好
 
-![InstaCrop 实际四角裁剪与精细几何界面](docs/images/workspace-crop.jpg)
+<p align="center">
+<a href="docs/images/workspace-crop.jpg"><img src="docs/images/workspace-crop.jpg" alt="InstaCrop 实际四角裁剪与精细几何界面" width="520"></a>
+</p>
 
 蓝色框对应相纸外缘，橙色框对应照片画面。左侧检查边缘，右侧调整朝向、微旋转与透视；需要细看时开启角点放大镜。设置完成后点击「完成」，回到列表继续整理。
 
