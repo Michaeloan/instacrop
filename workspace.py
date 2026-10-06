@@ -784,6 +784,9 @@ class Workspace:
             groups[source["id"]] = candidate
         working = destination if not zip_output else Path(tempfile.mkdtemp(dir=destination.parent, prefix="export-"))
         working.mkdir(parents=True, exist_ok=True)
+        modes = {"paper": "带白边", "image": "照片画面", "composition": "背景成图"}
+        for folder in modes.values():
+            (working / folder).mkdir(exist_ok=True)
         try:
             for page, data, index in targets:
                 if cancel_event and cancel_event.is_set():
@@ -796,35 +799,29 @@ class Workspace:
                     if cancel_event and cancel_event.is_set():
                         report["cancelled"] = True
                         break
-                    prefix = Path(groups[page["source_id"]]) / f"第{page['page']:03d}页" / f"照片{index:03d}"
-                    photo_output = working / prefix
+                    filename = f"{groups[page['source_id']]}_第{page['page']:03d}页_照片{index:03d}.png"
                     staging_photo = working / f"_partial_{_id()}"
                     staging_photo.mkdir()
                     record = {"id": data["id"], "source": page["name"], "page": page["page"], "files": {},
                               "restoration_stats": rendered.stats, "warnings": list(data.get("warnings", []))}
-                    modes = {"paper": "带白边", "image": "照片画面", "composition": "背景成图"}
                     for mode, array in rendered.images.items():
-                        relative = prefix / f"{modes[mode]}.png"
-                        target = staging_photo / relative.relative_to(prefix)
+                        relative = Path(modes[mode]) / filename
+                        target = staging_photo / relative
                         target.parent.mkdir(parents=True, exist_ok=True)
                         _pil(array).save(target, "PNG", **({"dpi": scan.dpi} if scan.dpi and mode != "composition" else {}))
                         record["files"][mode] = relative.as_posix()
                     if "image" not in rendered.images:
                         record["warnings"].append("仅导出相纸：内部画面未确认")
-                    if rendered.active:
-                        for mode, array in rendered.original.items():
-                            relative = prefix / "原始版本" / f"{modes[mode]}.png"
-                            target = staging_photo / relative.relative_to(prefix)
-                            target.parent.mkdir(parents=True, exist_ok=True)
-                            _pil(array).save(target, "PNG")
-                            record["files"]["original_" + mode] = relative.as_posix()
-                        relative = prefix / "修复记录" / "蒙版.png"
-                        target = staging_photo / relative.relative_to(prefix)
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        Image.fromarray(rendered.mask).save(target, "PNG")
-                        record["files"]["mask"] = relative.as_posix()
-                    photo_output.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(staging_photo, photo_output)
+                    committed = []
+                    try:
+                        for relative in record["files"].values():
+                            target = working / relative
+                            os.replace(staging_photo / relative, target)
+                            committed.append(target)
+                    except Exception:
+                        for target in committed:
+                            target.unlink(missing_ok=True)
+                        raise
                     report["photos"].append(record)
                     report["success"] += 1
                 except Exception as exc:
@@ -837,11 +834,12 @@ class Workspace:
                     progress(deepcopy(report))
             report["status"] = ("cancelled" if report["cancelled"] else "failed" if report["failed"] and not report["success"]
                                 else "partial" if report["failed"] else "completed")
-            _atomic_json(working / "导出清单.json", report)
             if zip_output and not report["cancelled"]:
                 temporary = destination.with_name(destination.name + ".tmp")
                 try:
                     with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+                        for folder in modes.values():
+                            archive.writestr(folder + "/", b"")
                         for file in working.rglob("*"):
                             if file.is_file():
                                 if cancel_event and cancel_event.is_set():

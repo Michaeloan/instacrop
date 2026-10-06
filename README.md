@@ -111,7 +111,7 @@
 
 ### ① 下载，然后解压
 
-打开 **[最新版下载页](https://github.com/Michaeloan/instacrop/releases/latest)**，在 **Assets（下载附件）** 中找到 `InstaCrop-Windows-1.0.0.zip`。
+打开 **[最新版下载页](https://github.com/Michaeloan/instacrop/releases/latest)**，在 **Assets（下载附件）** 中找到 `InstaCrop-Windows-1.0.1.zip`。
 
 下载后先解压，再双击文件夹里的 **`InstaCrop.exe`**。
 
@@ -152,7 +152,7 @@
 
 勾选要导出的照片，点击 **「导出照片」**；也可以从更多菜单选择 **「导出到文件夹」**。
 
-导出结果按来源、页码和照片编号整理。重复导出会使用新名称或新目录，避免直接覆盖之前的结果。
+导出后只有「带白边」「照片画面」「背景成图」三个文件夹，照片直接放在对应类别中。文件名带来源、页码和照片编号，便于对应同一张照片；不会附带原始副本、蒙版、预览图或导出清单。重复导出使用新名称或新目录，避免覆盖已有结果。
 
 **原扫描文件不会被改写。** 你可以先试一遍，再慢慢调整。
 
@@ -296,7 +296,7 @@ python desktop.py --self-test outputs/self-test.json
 ./build.ps1
 ```
 
-v1.0.0 发布前已通过 71 项测试，以及发行 EXE 功能自检和 WebView2 桌面载入检查。`build.ps1` 生成 Windows 便携 ZIP 与 SHA256 文件。仓库包含 GitHub Actions 测试与发行配置。
+v1.0.1 简化照片导出目录，只保留三类成图。发布时运行自动测试、发行 EXE 功能自检和 WebView2 桌面载入检查。`build.ps1` 生成 Windows 便携 ZIP 与 SHA256 文件。仓库包含 GitHub Actions 测试与发行配置。
 
 默认工作区为 `%LOCALAPPDATA%/PolaScanCrop/workspace`，环境变量 `POLASCAN_DATA_DIR` 可指定独立目录。项目中保留了 `.polascan` 文件格式，以方便保存静态照片编辑记录。
 

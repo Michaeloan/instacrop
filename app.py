@@ -112,35 +112,18 @@ def photos_from_data(scan, data):
 def build_export(scan, photos, occupancy=.78, trim=0, friendly_names=False):
     if not any(p.enabled for p in photos):
         raise ValueError("没有勾选要导出的照片")
-    manifest = {"source": scan.name, "page": scan.page, "source_size": [scan.image.shape[1], scan.image.shape[0]],
-                "dpi": scan.dpi, "trim_pixels": trim, "composition": {"background": "clear", "aspect": "inner-image; near-square snapped to 1:1", "occupancy": occupancy}, "photos": []}
     stream = BytesIO()
+    modes = {"paper": "带白边", "image": "照片画面", "composition": "背景成图"}
     with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_STORED) as archive:
+        for folder in modes.values():
+            archive.writestr(folder + "/", b"")
         for i, photo in enumerate(photos, 1):
             if not photo.enabled:
                 continue
             rendered = render_photo(scan, photo, trim, occupancy)
-            record = photo.as_dict(scan.dpi)
-            record.update(id=i, files={}, restoration_stats=rendered.stats)
-            if "image" not in rendered.images:
-                record["warnings"] += ["仅导出相纸：内部画面未确认"]
             for mode, img in rendered.images.items():
-                folder = {"paper":"带白边", "image":"照片画面", "composition":"背景成图"}[mode] if friendly_names else mode
-                filename = f"{folder}/{i:03d}.png"
+                filename = f"{modes[mode]}/{i:03d}.png"
                 archive.writestr(filename, png_bytes(img, scan.dpi if mode != "composition" else None))
-                record["files"][mode] = filename
-            if rendered.active:
-                for mode, img in rendered.original.items():
-                    folder = ("原始版本/" + {"paper":"带白边", "image":"照片画面", "composition":"背景成图"}[mode]) if friendly_names else f"original/{mode}"
-                    filename = f"{folder}/{i:03d}.png"
-                    archive.writestr(filename, png_bytes(img, scan.dpi if mode != "composition" else None))
-                    record["files"]["original_" + mode] = filename
-                filename = f"{'修复记录' if friendly_names else 'masks'}/{i:03d}.png"
-                archive.writestr(filename, png_bytes(rendered.mask))
-                record["files"]["mask"] = filename
-            manifest["photos"].append(record)
-        archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
-        archive.writestr("preview.png", png_bytes(preview_image(scan, photos)))
     return stream.getvalue()
 
 

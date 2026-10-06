@@ -126,7 +126,7 @@ class RestorationTests(unittest.TestCase):
                 for name in a.namelist():self.assertEqual(a.read(name),b.read(name))
         finally:server.server_close()
 
-    def test_native_save_bridge_uses_chosen_path_and_preserves_original(self):
+    def test_native_save_bridge_uses_chosen_path_and_exports_only_final_images(self):
         scan,photo=fixture()
         source=BytesIO();Image.fromarray(scan.image).save(source,"PNG")
         server=LocalServer(("127.0.0.1",0))
@@ -143,8 +143,7 @@ class RestorationTests(unittest.TestCase):
                 saved=api.save_artifact("export",{"job":job,"photos":[photo.as_dict(scan.dpi)]})
                 self.assertFalse(saved.get("error"),saved)
                 with zipfile.ZipFile(path) as z:
-                    self.assertIn("original/paper/001.png",z.namelist())
-                    self.assertIn("masks/001.png",z.namelist())
+                    self.assertEqual(set(z.namelist()), {"带白边/", "照片画面/", "背景成图/", "带白边/001.png", "照片画面/001.png", "背景成图/001.png"})
                 with patch.object(api._window,"create_file_dialog",return_value=None):
                     self.assertTrue(api.save_artifact("export",{"job":job})["cancelled"])
         finally:server.server_close()

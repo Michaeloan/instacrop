@@ -57,13 +57,11 @@ class LocalAppTests(unittest.TestCase):
             photo["enabled"] = False
         response = self.post("/api/export", {"job": result["job"], "photos": selected, "trim": 2})
         with zipfile.ZipFile(BytesIO(response.read())) as archive:
-            manifest = json.loads(archive.read("manifest.json"))
-            self.assertEqual(len(manifest["photos"]), 1)
-            self.assertEqual(manifest["trim_pixels"], 2)
-            self.assertTrue({"paper/001.png", "image/001.png", "composition/001.png", "preview.png"}.issubset(archive.namelist()))
+            self.assertEqual(set(archive.namelist()), {"带白边/", "照片画面/", "背景成图/",
+                                                     "带白边/001.png", "照片画面/001.png", "背景成图/001.png"})
         friendly=self.post("/api/export",{"job":result["job"],"photos":selected,"friendly_names":True})
         with zipfile.ZipFile(BytesIO(friendly.read())) as archive:
-            self.assertTrue({"带白边/001.png","照片画面/001.png","背景成图/001.png","原始版本/带白边/001.png"}.issubset(archive.namelist()))
+            self.assertEqual(set(archive.namelist()), {"带白边/", "照片画面/", "背景成图/", "带白边/001.png", "照片画面/001.png", "背景成图/001.png"})
 
     def test_reject_untrusted_origins_paths_and_bad_regions(self):
         for headers in [{}, {"Origin": "https://example.org"}]:

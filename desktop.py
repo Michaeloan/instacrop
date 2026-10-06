@@ -16,7 +16,7 @@ import tempfile
 
 from app import LocalServer, build_export, export_options, photos_from_data, save_project
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 TITLE = "InstaCrop 相纸扫描裁剪"
 
 
@@ -160,8 +160,8 @@ def self_test(report_path):
     assert np.array_equal(rendered.original["paper"], image)
     archive = build_export(scan, [photo])
     with zipfile.ZipFile(BytesIO(archive)) as saved:
-        assert "original/paper/001.png" in saved.namelist()
-        assert "masks/001.png" in saved.namelist()
+        assert {"带白边/001.png", "照片画面/001.png", "背景成图/001.png"}.issubset(saved.namelist())
+        assert all(name.split("/")[0] in {"带白边", "照片画面", "背景成图"} for name in saved.namelist())
     from workspace import Workspace
     from crop_detection import _face_cascade
     assert _face_cascade() is not None, "本机朝向模型未完整打包"

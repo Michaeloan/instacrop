@@ -97,6 +97,52 @@ class WorkspaceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.workspace.asset("../outside.png")
 
+    def test_export_has_only_three_flat_categories_with_unique_names_and_final_pixels(self):
+        first, second = self.add(), self.add()
+        multi = self.workspace.import_file(self.picture("多页.tiff", pages=2), "photo")
+        changed = deepcopy(first["photos"])
+        changed[0]["restoration"].update(enabled=True, adjustments=True, brightness=20)
+        self.workspace.update_page(first["id"], changed)
+        report = self.workspace.export(self.root / "三类", zip_output=False)
+        self.assertEqual((report["success"], report["failed"]), (4, 0), report)
+        output = Path(report["path"])
+        categories = {"带白边", "照片画面", "背景成图"}
+        self.assertEqual({p.name for p in output.iterdir()}, categories)
+        for category in categories:
+            files = list((output / category).iterdir())
+            self.assertEqual(len(files), 4)
+            self.assertTrue(all(p.is_file() and p.suffix == ".png" for p in files))
+        names = {p.name for p in (output / "带白边").iterdir()}
+        self.assertIn("照片_第001页_照片001.png", names)
+        self.assertIn("照片_2_第001页_照片001.png", names)
+        self.assertIn("多页_第002页_照片001.png", names)
+        expected = self.workspace.render(changed[0]["id"])
+        with Image.open(output / report["photos"][0]["files"]["paper"]) as image:
+            self.assertEqual(image.convert("RGB").tobytes(), expected.convert("RGB").tobytes())
+        zipped = self.workspace.export(self.root / "三类.zip")
+        with zipfile.ZipFile(zipped["path"]) as archive:
+            self.assertEqual({n.split("/")[0] for n in archive.namelist()}, categories)
+            self.assertTrue(all(len(n.strip("/").split("/")) <= 2 for n in archive.namelist()))
+            self.assertEqual(sum(not i.is_dir() for i in archive.infolist()), 12)
+        repeated = self.workspace.export(output, zip_output=False)
+        self.assertNotEqual(repeated["path"], report["path"])
+        self.assertEqual(len(list(output.rglob("*.png"))), 12)
+
+    def test_export_rolls_back_photo_if_a_category_cannot_be_committed(self):
+        self.add()
+        import workspace
+        replace = workspace.os.replace
+        def fail_second(source, target):
+            if Path(target).parent.name == "照片画面":
+                raise OSError("simulated disk full")
+            return replace(source, target)
+        with patch("workspace.os.replace", side_effect=fail_second):
+            report = self.workspace.export(self.root / "失败", zip_output=False)
+        self.assertEqual((report["success"], report["failed"]), (0, 1))
+        output = Path(report["path"])
+        self.assertEqual({p.name for p in output.iterdir()}, {"带白边", "照片画面", "背景成图"})
+        self.assertFalse(list(output.rglob("*.png")))
+
     def test_stream_export_grouping_selection_failures_and_cancel(self):
         first, second = self.add(), self.add("第二张.png")
         self.workspace.select([second["photos"][0]["id"]], False)
