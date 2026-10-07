@@ -112,10 +112,14 @@ class WorkspaceTests(unittest.TestCase):
             files = list((output / category).iterdir())
             self.assertEqual(len(files), 4)
             self.assertTrue(all(p.is_file() and p.suffix == ".png" for p in files))
+        all_names = [p.name for p in output.rglob("*.png")]
+        self.assertEqual(len(set(all_names)), 12, "Three styles must not collide when collected together")
+        for category in categories:
+            self.assertTrue(all(p.name.endswith("_" + category + ".png") for p in (output / category).iterdir()))
         names = {p.name for p in (output / "带白边").iterdir()}
-        self.assertIn("照片_第001页_照片001.png", names)
-        self.assertIn("照片_2_第001页_照片001.png", names)
-        self.assertIn("多页_第002页_照片001.png", names)
+        self.assertIn("照片_第001页_照片001_带白边.png", names)
+        self.assertIn("照片_2_第001页_照片001_带白边.png", names)
+        self.assertIn("多页_第002页_照片001_带白边.png", names)
         expected = self.workspace.render(changed[0]["id"])
         with Image.open(output / report["photos"][0]["files"]["paper"]) as image:
             self.assertEqual(image.convert("RGB").tobytes(), expected.convert("RGB").tobytes())

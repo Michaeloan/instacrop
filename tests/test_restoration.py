@@ -143,7 +143,7 @@ class RestorationTests(unittest.TestCase):
                 saved=api.save_artifact("export",{"job":job,"photos":[photo.as_dict(scan.dpi)]})
                 self.assertFalse(saved.get("error"),saved)
                 with zipfile.ZipFile(path) as z:
-                    self.assertEqual(set(z.namelist()), {"带白边/", "照片画面/", "背景成图/", "带白边/001.png", "照片画面/001.png", "背景成图/001.png"})
+                    self.assertEqual(set(z.namelist()), {"带白边/", "照片画面/", "背景成图/", "带白边/001_带白边.png", "照片画面/001_照片画面.png", "背景成图/001_背景成图.png"})
                 with patch.object(api._window,"create_file_dialog",return_value=None):
                     self.assertTrue(api.save_artifact("export",{"job":job})["cancelled"])
         finally:server.server_close()

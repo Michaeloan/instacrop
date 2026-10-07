@@ -58,10 +58,10 @@ class LocalAppTests(unittest.TestCase):
         response = self.post("/api/export", {"job": result["job"], "photos": selected, "trim": 2})
         with zipfile.ZipFile(BytesIO(response.read())) as archive:
             self.assertEqual(set(archive.namelist()), {"带白边/", "照片画面/", "背景成图/",
-                                                     "带白边/001.png", "照片画面/001.png", "背景成图/001.png"})
+                                                     "带白边/001_带白边.png", "照片画面/001_照片画面.png", "背景成图/001_背景成图.png"})
         friendly=self.post("/api/export",{"job":result["job"],"photos":selected,"friendly_names":True})
         with zipfile.ZipFile(BytesIO(friendly.read())) as archive:
-            self.assertEqual(set(archive.namelist()), {"带白边/", "照片画面/", "背景成图/", "带白边/001.png", "照片画面/001.png", "背景成图/001.png"})
+            self.assertEqual(set(archive.namelist()), {"带白边/", "照片画面/", "背景成图/", "带白边/001_带白边.png", "照片画面/001_照片画面.png", "背景成图/001_背景成图.png"})
 
     def test_reject_untrusted_origins_paths_and_bad_regions(self):
         for headers in [{}, {"Origin": "https://example.org"}]:

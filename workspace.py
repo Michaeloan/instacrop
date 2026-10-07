@@ -799,13 +799,13 @@ class Workspace:
                     if cancel_event and cancel_event.is_set():
                         report["cancelled"] = True
                         break
-                    filename = f"{groups[page['source_id']]}_第{page['page']:03d}页_照片{index:03d}.png"
+                    basename = f"{groups[page['source_id']]}_第{page['page']:03d}页_照片{index:03d}"
                     staging_photo = working / f"_partial_{_id()}"
                     staging_photo.mkdir()
                     record = {"id": data["id"], "source": page["name"], "page": page["page"], "files": {},
                               "restoration_stats": rendered.stats, "warnings": list(data.get("warnings", []))}
                     for mode, array in rendered.images.items():
-                        relative = Path(modes[mode]) / filename
+                        relative = Path(modes[mode]) / f"{basename}_{modes[mode]}.png"
                         target = staging_photo / relative
                         target.parent.mkdir(parents=True, exist_ok=True)
                         _pil(array).save(target, "PNG", **({"dpi": scan.dpi} if scan.dpi and mode != "composition" else {}))

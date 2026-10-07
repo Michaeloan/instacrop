@@ -6,7 +6,7 @@ import shutil
 import zipfile
 
 root = Path(__file__).parent
-folder = root / 'release/v1.0.1/InstaCrop'
+folder = root / 'release/v1.0.2/InstaCrop'
 if not (folder / 'InstaCrop.exe').is_file():
     raise SystemExit('Run build.ps1 first')
 shutil.copyfile(root / 'README.md', folder / '使用说明.md')
@@ -25,7 +25,7 @@ for name in ['numpy', 'opencv-python-headless', 'Pillow', 'pillow-heif', 'pywebv
 files = sorted(p for p in folder.rglob('*') if p.is_file())
 if any(p.suffix.lower() in {'.polascan', '.mov', '.mp4'} or p.name in {'auth.json', 'manifest.json', 'tasks.json'} or any(part in {'ffmpeg', 'livephotobox'} for part in p.relative_to(folder).parts) for p in files):
     raise RuntimeError('Unexpected private state or media tools in distribution')
-target = root / 'release/InstaCrop-Windows-1.0.1.zip'
+target = root / 'release/InstaCrop-Windows-1.0.2.zip'
 with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
     for path in files:
         archive.write(path, path.relative_to(folder.parent))

@@ -122,7 +122,7 @@ def build_export(scan, photos, occupancy=.78, trim=0, friendly_names=False):
                 continue
             rendered = render_photo(scan, photo, trim, occupancy)
             for mode, img in rendered.images.items():
-                filename = f"{modes[mode]}/{i:03d}.png"
+                filename = f"{modes[mode]}/{i:03d}_{modes[mode]}.png"
                 archive.writestr(filename, png_bytes(img, scan.dpi if mode != "composition" else None))
     return stream.getvalue()
 
