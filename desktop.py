@@ -10,13 +10,14 @@ import secrets
 from pathlib import Path
 import sys
 import threading
+import time
 import traceback
 import zipfile
 import tempfile
 
 from app import LocalServer, build_export, export_options, photos_from_data, save_project
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 TITLE = "InstaCrop 相纸扫描裁剪"
 
 
@@ -230,7 +231,19 @@ def main():
             logic = window.evaluate_js("Boolean(window.Gallery && window.RestUI && window.Workspace && window.CropUI && window.pywebview && window.pywebview.api && window.pywebview.api.save_workspace && window.pywebview.api.import_workspace)")
             if title != TITLE or not controls or not logic:
                 raise RuntimeError("桌面控件未完整载入")
-            result.update(status="ok",title=title,version=VERSION,renderer="edgechromium",repair_logic=True,native_save_bridge=True,batch_logic=True,crop_logic=True)
+            until = time.monotonic() + 20
+            while not window.evaluate_js("Boolean(token && Workspace.state.id)"):
+                if time.monotonic() > until:
+                    raise RuntimeError("工作区未能载入")
+                time.sleep(.15)
+            navigation = window.evaluate_js("Boolean(document.querySelector('.mode-nav [data-mode=library]') && document.querySelector('.mode-nav [data-mode=crop]') && document.querySelector('.mode-nav [data-mode=photo]') && document.getElementById('sourceGrid'))")
+            window.evaluate_js("Gallery.setMode('crop')")
+            scan_scope = window.evaluate_js("Gallery.mode === 'crop' && Gallery.visible().every(item => item.source.kind === 'scan')")
+            window.evaluate_js("Gallery.setMode('photo')")
+            photo_scope = window.evaluate_js("Gallery.mode === 'photo' && Gallery.visible().every(item => item.source.kind === 'photo')")
+            if not navigation or not scan_scope or not photo_scope:
+                raise RuntimeError("图片库与裁剪页面未正确分开")
+            result.update(status="ok",title=title,version=VERSION,renderer="edgechromium",repair_logic=True,native_save_bridge=True,batch_logic=True,crop_logic=True,workspace_loaded=True,separate_pages=True)
         except Exception:
             result.update(status="error",trace=traceback.format_exc())
         finally:

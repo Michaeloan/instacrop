@@ -8,3 +8,4 @@ outputs/
 .env*
 *.polascan
 .tmp/
+node_modules/
