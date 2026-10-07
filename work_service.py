@@ -174,9 +174,17 @@ class WorkService:
         if path == "/api/workspace/remove":
             ws.remove_source(data["source_id"]); return self.snapshot()
         if path == "/api/workspace/new":
-            if any(t["state"] in ("running", "queued", "paused", "cancelling") for t in self.queue.snapshot()):
-                raise ValueError("先取消或完成当前任务，再创建新批次")
-            ws.new(); return self.snapshot()
+            from task_queue import TasksActiveError
+            def create_batch():
+                ws.new()
+                return self.snapshot()
+            try:
+                return self.queue.run_when_idle(create_batch, cancel_active=data.get("cancel_tasks") is True)
+            except TasksActiveError as exc:
+                if data.get("cancel_tasks") is not True:
+                    raise
+                return {"pending": True, "active_tasks": [{key: task.get(key) for key in
+                    ("id", "kind", "state", "done", "total", "message")} for task in exc.tasks]}
         if path == "/api/workspace/export":
             return self.save("folder" if data.get("zip_output") is False else "export", data)
         if path == "/api/workspace/project-save":

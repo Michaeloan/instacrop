@@ -9,13 +9,29 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 
+ACTIVE_STATES = {"running", "queued", "paused", "cancelling"}
+TASK_NAMES = {"import": "导入图片", "retry_import": "重试导入", "redetect": "重新识别",
+              "save_project": "保存项目", "save_export": "导出照片", "save_folder": "导出照片",
+              "save_live": "导出手帐", "save_live_folder": "导出手帐", "live_generate": "生成手帐",
+              "live_render": "渲染手帐", "live_export": "导出手帐"}
+
+
+class TasksActiveError(ValueError):
+    def __init__(self, tasks):
+        self.tasks = tasks
+        names = "、".join(TASK_NAMES.get(task.get("kind"), "后台处理") for task in tasks)
+        super().__init__(f"仍有 {len(tasks)} 项任务尚未停止：{names}。请等待当前任务安全结束。")
+
+
 class TaskQueue:
     def __init__(self, root):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / "tasks.json"
         self.lock = threading.RLock()
+        self.submission_lock = threading.RLock()
         self.tasks = {}
+        self.futures = {}
         self.controls, self.workers, self.threads = {}, {}, []
         self.slots = {"local": threading.Semaphore(1), "ai": threading.Semaphore(1)}
         self.executors = {lane: ThreadPoolExecutor(max_workers=1, thread_name_prefix="PolaScan-" + lane) for lane in self.slots}
@@ -33,18 +49,65 @@ class TaskQueue:
 
     def snapshot(self):
         with self.lock:
+            self._reconcile()
             return copy.deepcopy(list(self.tasks.values()))
 
+    def _reconcile(self):
+        """An active label without a live executor future cannot block a batch."""
+        changed = False
+        for task_id, task in self.tasks.items():
+            if task.get("state") not in ACTIVE_STATES:
+                continue
+            future = self.futures.get(task_id)
+            if future is None:
+                task.update(state="interrupted", message="任务执行已中断，已完成成果保留；可重试未完成项", interrupted=True)
+            elif future.cancelled():
+                task.update(state="cancelled", message="已取消，完成的成果已保留")
+            elif future.done():
+                error = future.exception()
+                task.update(state="failed" if error else "interrupted",
+                            message=str(error)[:2000] if error else "任务执行已结束，旧状态已恢复；已完成成果保留")
+            else:
+                continue
+            changed = True
+        if changed:
+            self._save()
+
+    def active_tasks(self):
+        return [task for task in self.snapshot() if task.get("state") in ACTIVE_STATES]
+
+    def run_when_idle(self, operation, cancel_active=False):
+        """Keep new submissions out while checking and changing the workspace."""
+        with self.submission_lock:
+            if cancel_active:
+                for task in self.active_tasks():
+                    if task["state"] != "cancelling":
+                        try:
+                            self.control(task["id"], "cancel")
+                        except ValueError:
+                            # The worker may finish after the snapshot, before
+                            # cancellation acquires the queue lock.
+                            if any(active["id"] == task["id"] for active in self.active_tasks()):
+                                raise
+            active = self.active_tasks()
+            if active:
+                raise TasksActiveError(active)
+            return operation()
+
     def start(self, kind, items, worker, metadata=None, lane="local"):
+        if lane not in self.executors:
+            raise ValueError("未知任务队列")
         task_id = secrets.token_hex(12)
-        with self.lock:
+        with self.submission_lock, self.lock:
             self.tasks[task_id] = {"id": task_id, "kind": kind, "state": "queued", "progress": 0,
                 "done": 0, "total": len(items), "message": "已加入队列", "errors": [], "results": [],
                 "items": copy.deepcopy(items), "metadata": metadata or {}, "created": time.time()}
             self.controls[task_id] = (threading.Event(), threading.Event())
             self.workers[task_id] = (worker, lane)
             self._save()
-        self.threads.append(self.executors[lane].submit(self._run, task_id))
+            future = self.executors[lane].submit(self._run, task_id)
+            self.futures[task_id] = future
+            self.threads.append(future)
         return {"task_id": task_id}
 
     def _run(self, task_id):
@@ -103,7 +166,8 @@ class TaskQueue:
                 self._save()
 
     def control(self, task_id, action):
-        with self.lock:
+        with self.submission_lock, self.lock:
+            self._reconcile()
             if task_id not in self.tasks:
                 raise ValueError("没有这个任务")
             record = self.tasks[task_id]
@@ -127,6 +191,9 @@ class TaskQueue:
                 pause.clear(); record.update(state="queued", message="继续处理")
             elif action == "cancel":
                 cancel.set(); pause.clear(); record.update(state="cancelling", message="正在取消")
+                future = self.futures.get(task_id)
+                if future is not None and future.cancel():
+                    record.update(state="cancelled", message="已取消排队任务，完成的成果已保留")
             else:
                 raise ValueError("未知任务操作")
             self._save()

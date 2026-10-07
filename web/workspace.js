@@ -4,6 +4,7 @@
 window.Workspace = (() => {
   let state = {sources:[],pages:[],tasks:[]}, importKind = "scan", polling = false;
   let undoToken = null, batchFields = [], stoppedUploads = false, displayedSignature="",taskSignature="";
+  let activeUploads=0,batchSwitching=false;
   const downloads = new Set(), downloaded = new Set();
   const native = () => window.pywebview?.api;
   const request = async (path, body, raw = false) => {
@@ -55,23 +56,28 @@ window.Workspace = (() => {
   }
   async function select(photoIds,enabled) { if(!photoIds.length)return;await request("/api/workspace/select",{photo_ids:photoIds,enabled});await refresh(); }
   async function importFiles(files,kind=importKind) {
+    if(batchSwitching){status("正在切换批次，请稍候再导入。");return;}
     if(window.Gallery)Gallery.showImports(kind);
     importKind=kind; stoppedUploads=false;
     const selectedFiles=Array.from(files);let failures=0;
+    activeUploads++;
+    try {
     for(let i=0;i<selectedFiles.length;i++){
       if(stoppedUploads)break;
       const file=selectedFiles[i];status(`正在加入 ${i+1}/${selectedFiles.length}：${file.name}`);
       try { await request("/api/workspace/import?"+new URLSearchParams({kind,name:file.name}),file,true); }
       catch(error){failures++;status(`${file.name}：${error.message}`);}
     }
-    await refresh();await poll();status(failures?`${failures} 个文件无法加入，其他文件继续处理。`:"文件已加入当前批次，后台按顺序整理。");
+    await refresh();await poll();if(!batchSwitching)status(failures?`${failures} 个文件无法加入，其他文件继续处理。`:"文件已加入当前批次，后台按顺序整理。");
+    } finally {activeUploads--;}
   }
   async function choose(kind,folder=false) {
+    if(batchSwitching){status("正在切换批次，请稍候再导入。");return;}
     if(!token){status("正在连接工作区，请稍候。");return;}
     if(window.Gallery)Gallery.showImports(kind);
     importKind=kind;
     try {
-      if(native()?.import_workspace){const result=await native().import_workspace(kind,folder);if(result.error)throw new Error(result.error);if(!result.cancelled){await refresh();await poll();}return;}
+      if(native()?.import_workspace){activeUploads++;try{const result=await native().import_workspace(kind,folder);if(result.error)throw new Error(result.error);if(!result.cancelled){await refresh();await poll();}}finally{activeUploads--;}return;}
       if(folder){$("folderFiles").click();return;}
       $(kind==="scan"?"file":"photoFiles").click();
     }catch(error){status(error.message);}
@@ -79,6 +85,7 @@ window.Workspace = (() => {
   function track(result,download=false){if(result.error)throw new Error(result.error);if(result.task_id&&download)downloads.add(result.task_id);poll();return result;}
   async function save(kind,all=false){
     try{
+      if(batchSwitching){status("正在切换批次，请稍候再保存。");return;}
       if($("editDialog").open){status("请先完成或取消当前照片调整，再保存整个批次。");return;}
       const data={photo_ids:ids(all)};
       if(kind!=="project"&&!data.photo_ids.length){status("当前结果没有可导出的照片。");return;}
@@ -97,10 +104,10 @@ window.Workspace = (() => {
     $("taskPanel").hidden=!tasks.length;const list=$("taskList");list.replaceChildren();
     tasks.slice(-8).reverse().forEach(task=>{
       const row=document.createElement("div");row.className="task-row";
-      const label=document.createElement("div");const names={import:"导入",export:"导出",project:"保存项目",redetect:"重新识别",save_project:"保存项目",save_export:"导出照片",save_folder:"导出照片文件夹"};
+      const label=document.createElement("div");const names={import:"导入",retry_import:"重试导入",export:"导出",project:"保存项目",redetect:"重新识别",save_project:"保存项目",save_export:"导出照片",save_folder:"导出照片文件夹"};
       const stateNames={queued:"等待",running:"处理中",paused:"已暂停",complete:"完成",completed:"完成",failed:"失败",partial:"部分完成",cancelled:"已取消",interrupted:"已中断",cancelling:"正在取消"};
       const partial=task.results?.some(entry=>entry.result?.partial);
-      const title=document.createElement("strong");title.textContent=`${names[task.kind] || task.kind} · ${partial?"部分完成":stateNames[task.state] || task.state}`;
+      const title=document.createElement("strong");title.textContent=`${names[task.kind] || "后台处理"} · ${partial?"部分完成":stateNames[task.state] || "状态待恢复"}`;
       const detail=document.createElement("p");detail.textContent=`${task.message || ""}${task.total?` (${task.done || 0}/${task.total})`:""}`;
       label.append(title,detail);const progress=document.createElement("progress");progress.max=task.total || 100;progress.value=task.total?(task.done || 0):(task.progress || 0);label.append(progress);
       if(task.errors?.length){const errors=document.createElement("details"),summary=document.createElement("summary");summary.textContent=`${task.errors.length} 项需要检查`;errors.append(summary);task.errors.forEach(error=>{const p=document.createElement("p");p.textContent=typeof error==="string"?error:`${error.name || error.photo_id || ""} ${error.error || error.message || JSON.stringify(error)}`;errors.append(p);});label.append(errors);}
@@ -151,7 +158,22 @@ window.Workspace = (() => {
   $("export").onclick=()=>save("folder");$("exportAll").onclick=()=>save("folder",true);$("exportFolder").onclick=()=>save("export");$("saveProject").onclick=()=>save("project");
   $("openProject").onclick=()=>run(async()=>{if($("editDialog").open)throw new Error("请先完成或取消当前照片调整。");if(native()?.open_workspace_project){const result=await native().open_workspace_project();if(result.error)throw new Error(result.error);if(!result.cancelled)install(result.workspace || result);}else $("projectFile").click();});
   $("projectFile").onchange=()=>run(async()=>{const file=$("projectFile").files[0];if(!file)return;install(await request("/api/workspace/project-open",file,true));$("projectFile").value="";status("整批项目已恢复。");});
-  $("newBatch").onclick=()=>run(async()=>{if(!confirm("新建批次会关闭当前工作区。请先保存未保存的项目。继续？"))return;install(await request("/api/workspace/new",{}));scan=null;undoToken=null;$("batchUndo").disabled=true;status("已新建空批次。");});
+  $("newBatch").onclick=()=>run(async()=>{
+    if(batchSwitching||!confirm("新建批次会停止当前批次未完成的任务，并保留已有素材和编辑记录为本机历史。继续？"))return;
+    batchSwitching=true;stoppedUploads=true;$("newBatch").disabled=true;
+    const surfaces=[document.querySelector(".home"),document.querySelector(".workspace-nav"),document.querySelector(".header-actions")].filter(Boolean);
+    surfaces.forEach(surface=>surface.inert=true);
+    try{
+      while(activeUploads){status("正在等待当前上传结束，后续文件已停止加入。");await new Promise(resolve=>setTimeout(resolve,500));}
+      for(;;){
+        const result=await request("/api/workspace/new",{cancel_tasks:true});
+        if(!result.pending){install(result);scan=null;undoToken=null;$("batchUndo").disabled=true;status("已新建空批次；上一批素材和编辑记录已保留。");break;}
+        const detail=(result.active_tasks||[]).map(task=>`${({import:"导入图片",retry_import:"重试导入",redetect:"重新识别",save_project:"保存项目",save_export:"导出照片",save_folder:"导出照片"})[task.kind]||"后台处理"}${task.total?`（${task.done||0}/${task.total}）`:""}`).join("、");
+        status(`正在安全停止 ${detail||"当前任务"}，完成后自动新建批次；已完成成果保留。`);
+        await new Promise(resolve=>setTimeout(resolve,750));
+      }
+    }finally{batchSwitching=false;$("newBatch").disabled=false;surfaces.forEach(surface=>surface.inert=false);}
+  });
   async function removeSources(sourceIds){
     const sources=state.sources.filter(source=>sourceIds.includes(source.id));if(!sources.length)return;
     if(!confirm(`从图片库移除 ${sources.length} 个来源及相关裁剪成图？外部原文件不受影响。`))return;

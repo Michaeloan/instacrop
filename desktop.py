@@ -17,7 +17,7 @@ import tempfile
 
 from app import LocalServer, build_export, export_options, photos_from_data, save_project
 
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 TITLE = "InstaCrop 相纸扫描裁剪"
 
 
