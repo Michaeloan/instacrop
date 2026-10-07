@@ -5,6 +5,7 @@ window.Workspace = (() => {
   let state = {sources:[],pages:[],tasks:[]}, importKind = "scan", polling = false;
   let undoToken = null, batchFields = [], stoppedUploads = false, displayedSignature="",taskSignature="";
   let activeUploads=0,batchSwitching=false;
+  let snapshotVersion=0,activationVersion=0,pendingSelections=0,selectionChain=Promise.resolve(),batchIds=[];
   const downloads = new Set(), downloaded = new Set();
   const native = () => window.pywebview?.api;
   const request = async (path, body, raw = false) => {
@@ -17,10 +18,11 @@ window.Workspace = (() => {
   }
   function ids(all=false) { return (window.Gallery?Gallery.visible():photos()).filter(item=>all || item.photo.enabled).map(item=>item.photo.id); }
   function updateActions() {
-    const count=ids().length, exists=state.sources.length>0;
-    $("export").disabled=!count;$("exportLabel").textContent=count?`导出 ${count} 张照片`:"导出照片";
-    $("saveProject").disabled=!exists;$("batchEdit").disabled=!count;
-    $("exportAll").disabled=!ids(true).length;$("exportFolder").disabled=!count;
+    const count=ids().length, exists=state.sources.length>0,blocked=busy||batchSwitching||pendingSelections>0;
+    $("export").disabled=!count||blocked;$("exportLabel").textContent=count?`导出 ${count} 张照片`:"导出照片";
+    $("saveProject").disabled=!exists||blocked;$("batchEdit").disabled=!count||blocked;
+    $("exportAll").disabled=!ids(true).length||blocked;$("exportFolder").disabled=!count||blocked;
+    $("selectAll").disabled=blocked;$("selectNone").disabled=blocked;
     $("manualAdd").disabled=!state.pages.some(page=>state.sources.find(source=>source.id===page.source_id)?.kind==="scan") || busy;
     $("retryScan").disabled=!scan || busy;$("selectionSummary").textContent=`当前结果已选 ${count} / ${ids(true).length} 张`;
     if(window.Gallery)Gallery.updateSelection();
@@ -36,6 +38,7 @@ window.Workspace = (() => {
     });
   }
   function install(snapshot) {
+    snapshotVersion++;
     state={sources:[],pages:[],tasks:[],...snapshot};
     const signature=JSON.stringify([state.id,state.sources,state.pages]);
     const changed=signature!==displayedSignature;displayedSignature=signature;
@@ -43,18 +46,32 @@ window.Workspace = (() => {
     if(!window.Gallery){$("welcome").hidden=state.sources.length>0;$("galleryArea").hidden=!state.sources.length;}
     updateActions();if(changed&&window.Gallery)Gallery.render();
   }
-  async function refresh() { install(await request("/api/workspace")); }
-  async function activate(pageId) {
+  async function refresh() { const version=++snapshotVersion,snapshot=await request("/api/workspace");if(version===snapshotVersion)install(snapshot); }
+  async function activate(pageId,isCurrent=()=>true) {
     if (busy) throw new Error("当前照片正在保存，请稍候。");
-    const result=await request("/api/workspace/page",{page_id:pageId});
-    await installScan(result.page && typeof result.page==="object" ? result.page : result); setBusy(false); return scan;
+    const workspaceId=state.id,version=++activationVersion;
+    const owns=()=>version===activationVersion&&workspaceId===state.id&&!batchSwitching&&isCurrent();
+    try{
+      const result=await request("/api/workspace/page",{page_id:pageId});
+      if(!owns())return null;
+      const installed=await installScan(result.page && typeof result.page==="object" ? result.page : result,null,owns);
+      if(!installed||!owns())return null;setBusy(false);return scan;
+    }catch(error){if(!owns())return null;throw error;}
   }
   async function savePage() {
     if(!scan)return;
-    const result=await request("/api/workspace/update",{page_id:scan.id || scan.job,photos:scan.photos,revision:scan.revision});
-    if(result.revision!==undefined)scan.revision=result.revision;
+    const page=scan,workspaceId=state.id;
+    const result=await request("/api/workspace/update",{page_id:page.id || page.job,photos:page.photos,revision:page.revision});
+    if(result.revision!==undefined&&scan===page&&state.id===workspaceId)page.revision=result.revision;
   }
-  async function select(photoIds,enabled) { if(!photoIds.length)return;await request("/api/workspace/select",{photo_ids:photoIds,enabled});await refresh(); }
+  async function select(photoIds,enabled) {
+    if(!photoIds.length)return;if(batchSwitching)throw new Error("正在切换批次，请稍候再选择。");
+    snapshotVersion++;pendingSelections++;updateActions();
+    const workspaceId=state.id,selectedIds=[...photoIds];
+    const operation=selectionChain.then(async()=>{if(workspaceId!==state.id)return;await request("/api/workspace/select",{photo_ids:selectedIds,enabled});await refresh();});
+    selectionChain=operation.catch(()=>{});
+    try{return await operation;}finally{pendingSelections--;updateActions();}
+  }
   async function importFiles(files,kind=importKind) {
     if(batchSwitching){status("正在切换批次，请稍候再导入。");return;}
     if(window.Gallery)Gallery.showImports(kind);
@@ -86,6 +103,7 @@ window.Workspace = (() => {
   async function save(kind,all=false){
     try{
       if(batchSwitching){status("正在切换批次，请稍候再保存。");return;}
+      if(pendingSelections){status("正在保存选择，请稍候再导出或保存。");return;}
       if($("editDialog").open){status("请先完成或取消当前照片调整，再保存整个批次。");return;}
       const data={photo_ids:ids(all)};
       if(kind!=="project"&&!data.photo_ids.length){status("当前结果没有可导出的照片。");return;}
@@ -124,7 +142,7 @@ window.Workspace = (() => {
   }
   async function poll(){
     if(!token || polling)return;polling=true;
-    try{const result=await request("/api/tasks");const tasks=Array.isArray(result)?result:result.tasks || [];renderTasks(tasks);await refresh();$("workspaceError").hidden=true;}
+    try{const result=await request("/api/tasks");const tasks=Array.isArray(result)?result:result.tasks || [];renderTasks(tasks);if(!pendingSelections)await refresh();$("workspaceError").hidden=true;}
     catch(error){$("workspaceError").textContent=`工作区暂时无法载入：${error.message}`;$("workspaceError").hidden=false;status(error.message);}finally{polling=false;}
   }
   async function run(action){try{await action();}catch(error){status(error.message);}}
@@ -133,7 +151,9 @@ window.Workspace = (() => {
     track(await request("/api/workspace/redetect",{page_id:pageId,sensitivity:Number($("sensitivity").value),min_area:Number($("minArea").value)}));await refresh();
   }
   function batchDialog(){
-    const count=ids().length;if(!count)return;
+    if($("editDialog").open){status("请先完成或取消当前单张调整，再应用批量参数。");return;}
+    if(pendingSelections||batchSwitching)return;
+    batchIds=ids();const count=batchIds.length;if(!count)return;
     batchFields=[];$("batchCount").textContent=`将影响选中的 ${count} 张照片`;const parent=$("batchFields");parent.replaceChildren();
     const photo=currentPhoto() || photos().find(item=>item.photo.enabled)?.photo;
     const defaults={enabled:true,auto_border:true,auto_image:false,adjustments:false,sensitivity:40,max_diameter:14,radius:3,brightness:0,contrast:0,saturation:0,sharpen:0,denoise:0};
@@ -141,7 +161,7 @@ window.Workspace = (() => {
     definitions.forEach(([group,key,title,min,max])=>{const row=document.createElement("label");row.className="batch-field";const include=document.createElement("input");include.type="checkbox";include.setAttribute("aria-label",`应用${title}`);const name=document.createElement("span");name.textContent=title;const input=document.createElement("input");input.type=min==="bool"?"checkbox":"number";input.setAttribute("aria-label",title+"值");if(min==="bool")input.checked=photo?.[group]?.[key] ?? defaults[key];else{input.min=min;input.max=max;input.step=key==="occupancy"?.01:1;input.value=photo?.[group]?.[key] ?? (key==="trim"?0:key==="occupancy"?.78:defaults[key]);}row.append(include,name,input);parent.append(row);batchFields.push({group,key,include,input});});
     $("batchDialog").showModal();
   }
-  $("batchApply").onclick=()=>run(async()=>{const fields={};batchFields.filter(field=>field.include.checked).forEach(({group,key,input})=>{(fields[group] ||= {})[key]=input.type==="checkbox"?input.checked:Number(input.value);});if(!Object.keys(fields).length)throw new Error("先勾选要应用的参数。");const result=await request("/api/workspace/apply",{photo_ids:ids(),fields});undoToken=result.undo_token;$("batchUndo").disabled=!undoToken;$("batchDialog").close();await refresh();status("已应用批量参数，手工区域各自保留。");});
+  $("batchApply").onclick=()=>run(async()=>{const fields={};batchFields.filter(field=>field.include.checked).forEach(({group,key,input})=>{(fields[group] ||= {})[key]=input.type==="checkbox"?input.checked:Number(input.value);});if(!Object.keys(fields).length)throw new Error("先勾选要应用的参数。");const result=await request("/api/workspace/apply",{photo_ids:batchIds,fields});undoToken=result.undo_token;$("batchUndo").disabled=!undoToken;$("batchDialog").close();await refresh();status("已应用批量参数，手工区域各自保留。");});
   $("batchCancel").onclick=()=>$("batchDialog").close();$("batchEdit").onclick=batchDialog;
   $("batchUndo").onclick=()=>run(async()=>{await request("/api/workspace/undo",{undo_token:undoToken});undoToken=null;$("batchUndo").disabled=true;await refresh();status("已撤销该次批量参数。");});
   $("applyRepairAll").onclick=batchDialog;
@@ -164,15 +184,16 @@ window.Workspace = (() => {
     const surfaces=[document.querySelector(".home"),document.querySelector(".workspace-nav"),document.querySelector(".header-actions")].filter(Boolean);
     surfaces.forEach(surface=>surface.inert=true);
     try{
+      await selectionChain;
       while(activeUploads){status("正在等待当前上传结束，后续文件已停止加入。");await new Promise(resolve=>setTimeout(resolve,500));}
       for(;;){
         const result=await request("/api/workspace/new",{cancel_tasks:true});
-        if(!result.pending){install(result);scan=null;undoToken=null;$("batchUndo").disabled=true;status("已新建空批次；上一批素材和编辑记录已保留。");break;}
+        if(!result.pending){scan=null;undoToken=null;$("batchUndo").disabled=true;install(result);status("已新建空批次；上一批素材和编辑记录已保留。");break;}
         const detail=(result.active_tasks||[]).map(task=>`${({import:"导入图片",retry_import:"重试导入",redetect:"重新识别",save_project:"保存项目",save_export:"导出照片",save_folder:"导出照片"})[task.kind]||"后台处理"}${task.total?`（${task.done||0}/${task.total}）`:""}`).join("、");
         status(`正在安全停止 ${detail||"当前任务"}，完成后自动新建批次；已完成成果保留。`);
         await new Promise(resolve=>setTimeout(resolve,750));
       }
-    }finally{batchSwitching=false;$("newBatch").disabled=false;surfaces.forEach(surface=>surface.inert=false);}
+    }finally{batchSwitching=false;$("newBatch").disabled=false;surfaces.forEach(surface=>surface.inert=false);updateActions();}
   });
   async function removeSources(sourceIds){
     const sources=state.sources.filter(source=>sourceIds.includes(source.id));if(!sources.length)return;

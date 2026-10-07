@@ -137,9 +137,12 @@ class Workspace:
         self._cache = OrderedDict()
         self._undo = {}
         self.path = self.root / "manifest.json"
+        self._saved_manifest = None
+        self._saved_undo = {}
         if self.path.is_file():
             self.manifest = json.loads(self.path.read_text(encoding="utf-8"))
             self._validate_manifest(self.manifest)
+            self._saved_manifest = deepcopy(self.manifest)
             changed = False
             for source in self.manifest["sources"]:
                 if source["status"] == "importing":
@@ -163,7 +166,18 @@ class Workspace:
         return resolved
 
     def _persist(self):
-        _atomic_json(self.path, self.manifest)
+        try:
+            _atomic_json(self.path, self.manifest)
+        except Exception:
+            # A failed disk commit must not remain visible or be committed by a
+            # later unrelated edit. Restore the last successfully saved state.
+            if self._saved_manifest is not None:
+                self.manifest = deepcopy(self._saved_manifest)
+                self._undo = deepcopy(self._saved_undo)
+                self._cache.clear()
+            raise
+        self._saved_manifest = deepcopy(self.manifest)
+        self._saved_undo = deepcopy(self._undo)
 
     def save(self):
         with self.lock:
@@ -332,6 +346,9 @@ class Workspace:
                 self._persist()
         except Exception as exc:
             with self.lock:
+                # Persistence rollback replaces manifest records; reacquire the
+                # current source rather than modifying the detached old object.
+                source = self._source(source_id)
                 source.update(status="partial" if source["pages"] else "failed", error=str(exc))
                 completed = {page["page"] for page in self.manifest["pages"] if page["source_id"] == source_id}
                 source["failed_pages"] = [] if kind == "video" else sorted(set(range(1, source.get("page_count", 1) + 1)) - completed)
@@ -368,10 +385,10 @@ class Workspace:
                 self._cache.popitem(last=False)
             return scan
 
-    def read_page(self, page_id):
+    def read_page(self, page_id, with_source=True):
         with self.lock:
             source = self._source(self._page(page_id)["source_id"])
-            return self._read_scan(page_id), self.asset(source["asset"]).read_bytes()
+            return self._read_scan(page_id), self.asset(source["asset"]).read_bytes() if with_source else None
 
     def page_response(self, page_id):
         with self.lock:
@@ -470,9 +487,14 @@ class Workspace:
             raise ValueError("勾选状态必须是开关")
         with self.lock:
             targets = [self.locate_photo(key) for key in dict.fromkeys(photo_ids)]
+            touched = set()
             for page, photo in targets:
                 target = next(p for p in self._page(page["id"])["photos"] if p["id"] == photo["id"])
-                target["enabled"] = enabled
+                if target.get("enabled", True) != enabled:
+                    target["enabled"] = enabled
+                    touched.add(page["id"])
+            for page_id in touched:
+                self._page(page_id)["revision"] += 1
             self._persist()
         return self.snapshot()
 
@@ -567,12 +589,12 @@ class Workspace:
 
     @staticmethod
     def _validate_manifest(meta):
-        if meta.get("live") or any(src.get("kind") == "video" for src in meta.get("sources", [])):
-            raise ValueError("裁剪版只支持静态照片项目，请从原版导出照片后导入")
         if not isinstance(meta, dict) or meta.get("version") != 2:
             raise ValueError("不支持这个版本的批次项目")
         if not isinstance(meta.get("sources"), list) or not isinstance(meta.get("pages"), list):
             raise ValueError("项目来源或页面格式不正确")
+        if meta.get("live") or any(src.get("kind") == "video" for src in meta["sources"]):
+            raise ValueError("裁剪版只支持静态照片项目，请从原版导出照片后导入")
         if not isinstance(meta.get("id"), str) or not re.fullmatch(r"[0-9a-f]{32}", meta["id"]):
             raise ValueError("项目 ID 不正确")
         if len(meta["sources"]) > MAX_MEMBERS or len(meta["pages"]) > MAX_MEMBERS:
@@ -594,7 +616,7 @@ class Workspace:
             pages[page["id"]] = page
             _safe_relative(page["asset"])
             width, height = page["width"], page["height"]
-            if not isinstance(width, int) or not isinstance(height, int) or min(width, height) < 2 or width * height > 100000000:
+            if type(width) is not int or type(height) is not int or min(width, height) < 2 or width * height > MAX_PIXELS:
                 raise ValueError("项目页面尺寸不正确")
             if not isinstance(page["revision"], int) or page["revision"] < 0 or len(page["photos"]) > 100:
                 raise ValueError("项目照片或版本不正确")
@@ -662,6 +684,8 @@ class Workspace:
                     if archive.getinfo("project.json").file_size > MAX_METADATA_BYTES:
                         raise ValueError("项目设置过大")
                     meta = json.loads(archive.read("project.json"))
+                    if not isinstance(meta, dict):
+                        raise ValueError("项目设置格式不正确")
                     if meta.get("version") == 1:
                         meta = self._legacy_project(archive, meta, staging)
                     else:
@@ -718,6 +742,7 @@ class Workspace:
                     raise
                 self._cache.clear()
                 self._undo.clear()
+                self._saved_undo.clear()
         return self.snapshot()
 
     def _legacy_project(self, archive, meta, staging):

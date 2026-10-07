@@ -63,17 +63,17 @@ class LocalServer(ThreadingHTTPServer):
             self.jobs[job_id], self.sources[job_id] = scan, source
         return job_id
 
-    def load(self, job_id):
+    def load(self, job_id, with_source=True):
         if self.work is not None:
             try:
-                return self.work.workspace.read_page(job_id)
+                return self.work.workspace.read_page(job_id, with_source=with_source)
             except (ValueError, KeyError):
                 pass
         with self.lock:
             scan, source = self.jobs.get(job_id), self.sources.get(job_id)
         if scan is None:
             raise ValueError("扫描任务已过期，请重新打开扫描图或项目")
-        return scan, source
+        return scan, source if with_source else None
 
 
 def decode_scan(source, name, page=1):
@@ -175,10 +175,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
         for key, value in (headers or {}).items():
             self.send_header(key, value)
-        self.end_headers()
         try:
+            self.end_headers()
             self.wfile.write(data)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
 
     def host_valid(self):
@@ -218,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
                 query = urllib.parse.parse_qs(url.query)
                 if self.headers.get("X-Session-Token") != self.server.token and query.get("token", [""])[0] != self.server.token:
                     self.send({"error": "请从本机软件读取原图"}, status=403); return
-                scan, _ = self.server.load(query.get("job", [""])[0])
+                scan, _ = self.server.load(query.get("job", [""])[0], with_source=False)
                 x, y = float(query["x"][0]), float(query["y"][0])
                 size = int(query.get("size", ["256"])[0])
                 if not np.isfinite([x, y]).all() or not 32 <= size <= 512:
@@ -236,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send({"error": str(exc)}, status=400)
         elif url.path == "/api/scan-preview":
             try:
-                scan, _ = self.server.load(urllib.parse.parse_qs(url.query).get("job", [""])[0])
+                scan, _ = self.server.load(urllib.parse.parse_qs(url.query).get("job", [""])[0], with_source=False)
                 thumb = Image.fromarray(scan.image); thumb.thumbnail((1800, 1800), Image.Resampling.LANCZOS)
                 stream = BytesIO(); thumb.save(stream, "JPEG", quality=93)
                 self.send(stream.getvalue(), "image/jpeg")
@@ -265,20 +265,28 @@ class Handler(BaseHTTPRequestHandler):
                     if not 0 < length <= limit:
                         raise ValueError("文件过大或为空")
                     name = Path(query.get("name", ["upload.polascan" if url.path.endswith("project-open") else "upload.png"])[0]).name
-                    upload = service.uploads / (secrets.token_hex(12) + "_" + name)
-                    with upload.open("wb") as destination:
-                        remaining = length
-                        while remaining:
-                            chunk = self.rfile.read(min(1024 * 1024, remaining))
-                            if not chunk:
-                                raise ValueError("上传未完成")
-                            destination.write(chunk); remaining -= len(chunk)
-                    if url.path == "/api/workspace/import":
-                        self.send(service.import_paths([str(upload)], query.get("kind", ["scan"])[0], [name]))
-                    elif url.path == "/api/workspace/project-open":
-                        if any(t["state"] in ("running", "queued", "paused", "cancelling") for t in service.queue.snapshot()):
-                            raise ValueError("先取消或完成当前任务，再打开项目")
-                        service.workspace.open_project(upload); self.send(service.snapshot())
+                    upload = service.uploads / (secrets.token_hex(12) + Path(name).suffix.lower())
+                    transferred = False
+                    try:
+                        with upload.open("wb") as destination:
+                            remaining = length
+                            while remaining:
+                                chunk = self.rfile.read(min(1024 * 1024, remaining))
+                                if not chunk:
+                                    raise ValueError("上传未完成")
+                                destination.write(chunk); remaining -= len(chunk)
+                        if url.path == "/api/workspace/import":
+                            result = service.import_paths([str(upload)], query.get("kind", ["scan"])[0], [name])
+                            transferred = True
+                            self.send(result)
+                        elif url.path == "/api/workspace/project-open":
+                            def restore_project():
+                                service.workspace.open_project(upload)
+                                return service.snapshot()
+                            self.send(service.queue.run_when_idle(restore_project))
+                    finally:
+                        if not transferred:
+                            upload.unlink(missing_ok=True)
                     return
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= MAX_JSON:
@@ -307,7 +315,7 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(body)
             if not isinstance(data, dict):
                 raise ValueError("操作参数格式不正确")
-            scan, source = self.server.load(data.get("job"))
+            scan, source = self.server.load(data.get("job"), with_source=url.path in ("/api/project-save", "/api/redetect"))
             if url.path == "/api/redetect":
                 scan, pages = decode_scan(source, scan.name, int(data.get("page", scan.page)))
                 settings = Settings(min_area=float(data.get("min_area", .002)), sensitivity=float(data.get("sensitivity", 1)))

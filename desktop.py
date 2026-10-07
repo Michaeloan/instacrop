@@ -17,7 +17,7 @@ import tempfile
 
 from app import LocalServer, build_export, export_options, photos_from_data, save_project
 
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 TITLE = "InstaCrop 相纸扫描裁剪"
 
 
@@ -67,10 +67,10 @@ class DesktopAPI:
             chosen = self._window.create_file_dialog(webview.FileDialog.OPEN, file_types=("相纸项目 (*.polascan)",))
             if not chosen:
                 return {"cancelled": True}
-            if any(t["state"] in ("queued", "running", "paused", "cancelling") for t in service.queue.snapshot()):
-                raise ValueError("先取消或完成任务，再打开另一个项目")
-            service.workspace.open_project(Path(chosen[0] if isinstance(chosen, (list, tuple)) else chosen))
-            return service.snapshot()
+            def restore_project():
+                service.workspace.open_project(Path(chosen[0] if isinstance(chosen, (list, tuple)) else chosen))
+                return service.snapshot()
+            return service.queue.run_when_idle(restore_project)
         except Exception as exc:
             logging.exception("Project open failed")
             return {"error": str(exc)}

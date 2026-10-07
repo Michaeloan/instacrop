@@ -8,6 +8,8 @@
 
 **自动找边 · 歪了拉正 · 白边可留 · 批量导出**
 
+**1.0.5 已完成集中缺陷修复**：选择与编辑竞态、磁盘提交失败回滚、空选择误导出、项目恢复与任务退出、大扫描图重开及预览、长文件名导入。查看 [本轮修复记录](docs/bug-audit-20261008.md)。
+
 [📦 下载 Windows 版](https://github.com/Michaeloan/instacrop/releases/latest)　｜　[🌷 第一次使用](#-第一次使用跟着这-5-步走)　｜　[💬 常见问题](#-你可能想问)
 
 <a href="docs/images/landscape-hero.jpg"><img src="docs/images/landscape-hero.jpg" alt="林间蓝水的照片画面成图" width="300"></a>
@@ -50,9 +52,9 @@
 
 扫描图中的照片会分别进入列表，附上来源文件与页码。再导入下一页时，照片会追加到当前批次，之前的调整会保留。
 
-1.0.4 将素材整理和裁剪分为三个页面：「图片库」管理原始来源，「扫描裁剪」处理整页扫描图，「照片调整」处理已经分开的普通照片。各页面分别保留来源、搜索和检查条件。
+1.0.5 将素材整理和裁剪分为三个页面：「图片库」管理原始来源，「扫描裁剪」处理整页扫描图，「照片调整」处理已经分开的普通照片。各页面分别保留来源、搜索和检查条件。
 
-1.0.4 修复新建批次被后台任务长期阻塞：排队任务立即取消，失去执行实例的旧状态自动恢复。新建批次会等待当前任务安全结束后自动切换，并保留上一批素材与编辑记录；等待时显示具体任务与处理数量。
+1.0.5 修复新建批次被后台任务长期阻塞：排队任务立即取消，失去执行实例的旧状态自动恢复。新建批次会等待当前任务安全结束后自动切换，并保留上一批素材与编辑记录；等待时显示具体任务与处理数量。
 
 ### 02 / 有点歪，可以拉正；不太准，可以自己改
 
@@ -100,7 +102,7 @@
 ### 图片库：先分清扫描原图和独立照片
 
 <p align="center">
-<a href="docs/images/workspace-library.jpg"><img src="docs/images/workspace-library.jpg" alt="InstaCrop 1.0.4 图片库，使用合成示例素材展示分类与来源管理" width="520"></a>
+<a href="docs/images/workspace-library.jpg"><img src="docs/images/workspace-library.jpg" alt="InstaCrop 1.0.5 图片库，使用合成示例素材展示分类与来源管理" width="520"></a>
 </p>
 
 每张卡片对应一个导入来源，扫描原图显示页数与成图数量。按类型分类、搜索或选择来源，再进入扫描裁剪或照片调整。新导入会清除旧筛选，确保新素材可以看到。
@@ -125,7 +127,7 @@
 
 ### ① 下载，然后解压
 
-打开 **[最新版下载页](https://github.com/Michaeloan/instacrop/releases/latest)**，在 **Assets（下载附件）** 中找到 `InstaCrop-Windows-1.0.4.zip`。
+打开 **[最新版下载页](https://github.com/Michaeloan/instacrop/releases/latest)**，在 **Assets（下载附件）** 中找到 `InstaCrop-Windows-1.0.5.zip`。
 
 下载后先解压，再双击文件夹里的 **`InstaCrop.exe`**。
 
@@ -312,7 +314,7 @@ python desktop.py --self-test outputs/self-test.json
 ./build.ps1
 ```
 
-v1.0.4 拆分图片库、扫描裁剪和照片调整；素材分类、来源管理与导入入口相互对应，导出与批量参数只处理当前结果。照片导出仍只保留三类成图。发布时运行自动测试、界面回归检查与发行 EXE 功能自检。`build.ps1` 生成 Windows 便携 ZIP 与 SHA256 文件。仓库包含 GitHub Actions 测试与发行配置。
+v1.0.5 拆分图片库、扫描裁剪和照片调整；素材分类、来源管理与导入入口相互对应，导出与批量参数只处理当前结果。照片导出仍只保留三类成图。发布时运行自动测试、界面回归检查与发行 EXE 功能自检。`build.ps1` 生成 Windows 便携 ZIP 与 SHA256 文件。仓库包含 GitHub Actions 测试与发行配置。
 
 界面测试使用合成素材，不读取个人工作区：
 

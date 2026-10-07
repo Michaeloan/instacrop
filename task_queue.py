@@ -6,7 +6,7 @@ from pathlib import Path
 import secrets
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 
 
 ACTIVE_STATES = {"running", "queued", "paused", "cancelling"}
@@ -32,6 +32,7 @@ class TaskQueue:
         self.submission_lock = threading.RLock()
         self.tasks = {}
         self.futures = {}
+        self.closed = False
         self.controls, self.workers, self.threads = {}, {}, []
         self.slots = {"local": threading.Semaphore(1), "ai": threading.Semaphore(1)}
         self.executors = {lane: ThreadPoolExecutor(max_workers=1, thread_name_prefix="PolaScan-" + lane) for lane in self.slots}
@@ -64,9 +65,13 @@ class TaskQueue:
             elif future.cancelled():
                 task.update(state="cancelled", message="已取消，完成的成果已保留")
             elif future.done():
-                error = future.exception()
-                task.update(state="failed" if error else "interrupted",
-                            message=str(error)[:2000] if error else "任务执行已结束，旧状态已恢复；已完成成果保留")
+                try:
+                    error = future.exception()
+                except CancelledError:
+                    task.update(state="cancelled", message="已取消，完成的成果已保留")
+                else:
+                    task.update(state="failed" if error else "interrupted",
+                                message=str(error)[:2000] if error else "任务执行已结束，旧状态已恢复；已完成成果保留")
             else:
                 continue
             changed = True
@@ -79,6 +84,8 @@ class TaskQueue:
     def run_when_idle(self, operation, cancel_active=False):
         """Keep new submissions out while checking and changing the workspace."""
         with self.submission_lock:
+            if self.closed:
+                raise ValueError("任务队列已关闭，请重新打开软件")
             if cancel_active:
                 for task in self.active_tasks():
                     if task["state"] != "cancelling":
@@ -99,13 +106,25 @@ class TaskQueue:
             raise ValueError("未知任务队列")
         task_id = secrets.token_hex(12)
         with self.submission_lock, self.lock:
+            if self.closed:
+                raise ValueError("任务队列已关闭，请重新打开软件")
             self.tasks[task_id] = {"id": task_id, "kind": kind, "state": "queued", "progress": 0,
                 "done": 0, "total": len(items), "message": "已加入队列", "errors": [], "results": [],
                 "items": copy.deepcopy(items), "metadata": metadata or {}, "created": time.time()}
             self.controls[task_id] = (threading.Event(), threading.Event())
             self.workers[task_id] = (worker, lane)
-            self._save()
-            future = self.executors[lane].submit(self._run, task_id)
+            try:
+                self._save()
+                future = self.executors[lane].submit(self._run, task_id)
+            except Exception:
+                self.tasks.pop(task_id, None)
+                self.controls.pop(task_id, None)
+                self.workers.pop(task_id, None)
+                try:
+                    self._save()
+                except Exception:
+                    pass
+                raise
             self.futures[task_id] = future
             self.threads.append(future)
         return {"task_id": task_id}
@@ -200,7 +219,10 @@ class TaskQueue:
             return copy.deepcopy(record)
 
     def close(self):
-        for cancel, pause in self.controls.values():
-            cancel.set(); pause.clear()
-        for executor in self.executors.values():
-            executor.shutdown(wait=False, cancel_futures=True)
+        with self.submission_lock:
+            self.closed = True
+            with self.lock:
+                for cancel, pause in self.controls.values():
+                    cancel.set(); pause.clear()
+            for executor in self.executors.values():
+                executor.shutdown(wait=False, cancel_futures=True)

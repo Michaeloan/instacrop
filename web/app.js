@@ -8,7 +8,7 @@ let cropFocus = null;
 const controls = ["add", "redetect", "export", "findInner", "drawInner", "borderless", "rotate", "markReviewed", "remove", "editInner", "editOuter", "page", "sensitivity", "minArea", "occupancy", "trim"];
 controls.push("saveProject", "stepRepair", "stepExport", "applyRepairAll");
 function status(message, loading = false) { $("status").textContent = message; if($("editDialog")?.open&&$("editorMessage"))$("editorMessage").textContent=message; document.body.classList.toggle("busy", loading); }
-function setBusy(value) { busy = value; controls.forEach(id => { $(id).disabled = value || !scan; }); if (!window.Workspace) { $("openButton").disabled = value; $("emptyOpen").disabled = value; $("openProject").disabled = value; } if (window.RestUI) RestUI.setBusy(value); if (window.Workspace) Workspace.updateActions(); }
+function setBusy(value) { busy = value; controls.forEach(id => { $(id).disabled = value || !scan; }); document.querySelectorAll("#photoList button, #photoList input").forEach(node => { node.disabled = value; }); if (!window.Workspace) { $("openButton").disabled = value; $("emptyOpen").disabled = value; $("openProject").disabled = value; } if (window.RestUI) RestUI.setBusy(value); if (window.Workspace) Workspace.updateActions(); }
 async function api(path, data, raw = false) {
   const response = await fetch(path, {method: "POST", headers: {"X-Session-Token": token, "Content-Type": raw ? "application/octet-stream" : "application/json"}, body: raw ? data : JSON.stringify(data)});
   if (!response.ok) { const error = await response.json(); throw new Error(error.error || "处理失败"); }
@@ -33,9 +33,10 @@ async function loadScan(file, page = 1) {
   } catch (error) { status(error.message); }
   finally { setBusy(false); $("file").value=""; }
 }
-async function installScan(result, file = null) {
+async function installScan(result, file = null, isCurrent = () => true) {
     const newImage = new Image(); newImage.src = "/api/scan-preview?job=" + encodeURIComponent(result.job);
     await newImage.decode();
+    if (!isCurrent()) return false;
     scan = result; scanImage = newImage; currentFile = file; selected = 0; handle = null; drawing = null; draft = [];
     lastPreview = null;
     editMode = "outer"; zoom = 1;
@@ -51,6 +52,7 @@ async function installScan(result, file = null) {
     if (window.RestUI) RestUI.onNewScan();
     fitCanvas(); renderList(); renderEditor();
     if (window.Workspace) { setBusy(false); } else if (window.Gallery) await Gallery.onScan(); else schedulePreview();
+    return true;
 }
 async function redetect(page) {
   if (busy || !scan) return;
@@ -123,12 +125,14 @@ function renderList() {
   scan.photos.forEach((photo, index) => {
     const row = document.createElement("div"); row.className = "photo-row" + (index === selected ? " selected" : "");
     const check = document.createElement("input"); check.type = "checkbox"; check.checked = photo.enabled; check.setAttribute("aria-label", `导出照片 ${index + 1}`);
-    check.onchange = () => { photo.enabled = check.checked; draw(); };
+    check.disabled = busy;
+    check.onchange = () => { if (busy) { check.checked = photo.enabled; return; } photo.enabled = check.checked; draw(); };
     const button = document.createElement("button"); button.type = "button";
     const title = document.createElement("span"); title.textContent = `照片 ${index + 1}`;
     const hint = document.createElement("span"); hint.className = "row-hint" + (photo.warnings.length ? " pending" : "");
     hint.textContent = !photo.inner ? "画面待框选" : photo.warnings.length ? "需检查" : photo.reviewed ? "已检查" : "相纸 + 画面";
-    button.append(title, hint); button.onclick = () => { selected = index; handle = null; drawing = null; draft = []; renderList(); renderEditor(); draw(); schedulePreview(); };
+    button.disabled = busy;
+    button.append(title, hint); button.onclick = () => { if (busy) return; selected = index; handle = null; drawing = null; draft = []; renderList(); renderEditor(); draw(); schedulePreview(); };
     row.append(check, button); list.append(row);
   });
   if (!scan.photos.length) { const p = document.createElement("p"); p.className = "quiet"; p.textContent = "可调整识别参数，或手动补一张。"; list.append(p); }
@@ -138,6 +142,11 @@ function renderEditor() {
   const photo = currentPhoto(); $("editor").hidden = !photo;
   if (window.RestUI) RestUI.renderOptions();
   if (!photo) { clearPreviews(); return; }
+  if (window.Gallery) {
+    $("trim").value = photo.presentation?.trim || 0;
+    $("occupancy").value = Math.round((photo.presentation?.occupancy ?? .78) * 100);
+    $("occupancyValue").textContent = $("occupancy").value + "%";
+  }
   $("selectedName").textContent = `照片 ${selected + 1}`;
   $("formatHint").textContent = (photo.format_hints || ["其他 / 未知格式"]).join(" / ");
   $("editOuter").classList.toggle("active", editMode === "outer"); $("editInner").classList.toggle("active", editMode === "inner");

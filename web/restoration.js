@@ -4,6 +4,7 @@ window.RestUI = (() => {
   let owner = null, data = null, originals = null, repaired = null, maskImage = null, ready = false;
   let repairZoom = 1, brush = null, pointer = null, draftStroke = null;
   const redo = new WeakMap();
+  function cancelBrush() { brush = null; pointer = null; draftStroke = null; }
   const defaults = () => ({enabled:false,auto_border:true,auto_image:false,sensitivity:40,max_diameter:14,radius:3,adjustments:false,brightness:0,contrast:0,saturation:0,sharpen:0,denoise:0,strokes:[]});
   const fields = {repairEnabled:"enabled",autoBorder:"auto_border",autoImage:"auto_image",dustSensitivity:"sensitivity",dustDiameter:"max_diameter",inpaintRadius:"radius",adjustmentsEnabled:"adjustments",brightness:"brightness",contrast:"contrast",saturation:"saturation",sharpen:"sharpen",denoise:"denoise"};
   function options(photo = currentPhoto()) { if (!photo) return null; if (!photo.restoration || !Array.isArray(photo.restoration.strokes)) photo.restoration = {...defaults(),...(photo.restoration || {}),strokes:photo.restoration?.strokes || []}; return photo.restoration; }
@@ -11,7 +12,7 @@ window.RestUI = (() => {
   $("stepCrop").onclick = () => workspace("crop"); $("stepRepair").onclick = () => workspace("repair"); $("stepExport").onclick = () => workspace("export");
   function renderOptions() {
     const photo = currentPhoto(), value = options(photo); $("repairOptions").hidden = !photo;
-    if (owner !== photo) { owner = photo; ready = false; data = null; repaired = null; originals = null; maskImage = null; repairZoom = 1; repairCanvas.hidden = true; $("repairEmpty").hidden = false; $("repairEmpty").textContent = photo ? "正在生成原图预览…" : "选择一张照片，等待裁剪预览。"; $("repairStats").textContent = photo ? "正在生成本张预览…" : "先选择一张照片"; $("repairHint").textContent = "预览更新中，暂不涂抹"; $("repairWarning").hidden = true; lastPreview = null; clearPreviews(); }
+    if (owner !== photo) { cancelBrush(); owner = photo; ready = false; data = null; repaired = null; originals = null; maskImage = null; repairZoom = 1; repairCanvas.hidden = true; $("repairEmpty").hidden = false; $("repairEmpty").textContent = photo ? "正在生成原图预览…" : "选择一张照片，等待裁剪预览。"; $("repairStats").textContent = photo ? "正在生成本张预览…" : "先选择一张照片"; $("repairHint").textContent = "预览更新中，暂不涂抹"; $("repairWarning").hidden = true; lastPreview = null; clearPreviews(); }
     if (!value) return;
     $("repairPhotoName").textContent = `照片 ${selected + 1} · 污点修复`;
     Object.entries(fields).forEach(([id,key]) => { if ($(id).type === "checkbox") $(id).checked = ["auto_border","auto_image"].includes(key)?value.enabled&&value[key]:value[key]; else $(id).value = value[key]; updateOutput(id); });
@@ -28,14 +29,14 @@ window.RestUI = (() => {
   function redoStroke() { const photo = currentPhoto(), stack = redo.get(photo) || []; if (!photo || busy || !stack.length) return; options().strokes.push(stack.pop()); changed(); }
   $("undoStroke").onclick = undoStroke; $("redoStroke").onclick = redoStroke;
   $("clearStrokes").onclick = () => { const value = options(); if (!value || busy) return; value.strokes = []; redo.delete(currentPhoto()); changed(); };
-  function pending() { ready = false; if (data) $("repairStats").textContent = "正在更新全分辨率修复预览…"; }
+  function pending() { cancelBrush(); ready = false; if (data) $("repairStats").textContent = "正在更新全分辨率修复预览…"; }
   function failed(message) { ready = false; $("repairStats").textContent = message; }
   async function setPreview(result, photo, version) {
     if (currentPhoto() !== photo || version !== previewVersion) return;
     const load = async src => { const img = new Image(); img.src = src; await img.decode(); return img; };
     const images = await Promise.all([load(result.original),load(result.result),load(result.mask)]);
     if (currentPhoto() !== photo || version !== previewVersion) return;
-    owner = photo; data = result; [originals,repaired,maskImage] = images; ready = true; draftStroke = null;
+    cancelBrush(); owner = photo; data = result; [originals,repaired,maskImage] = images; ready = true;
     repairCanvas.hidden = false; $("repairEmpty").hidden = true;
     const stats = result.stats;
     $("repairStats").textContent = result.active ? `自动候选 ${stats.auto_spots} 处 · 手动 ${stats.manual_strokes} 笔 · 修复 ${stats.masked_pixels.toLocaleString()} 像素` : "修复未启用；当前显示原始裁剪";
@@ -69,10 +70,10 @@ window.RestUI = (() => {
     const source=project(point,inverse(data.source_to_paper));source[0]=Math.max(0,Math.min(scan.width-1,source[0]));source[1]=Math.max(0,Math.min(scan.height-1,source[1]));draftStroke.points.push(source);draftStroke.paperPoints.push(point);
   }
   repairCanvas.addEventListener("pointerdown",e=>{if(!ready || busy || !data || !currentPhoto())return;repairCanvas.focus();const value=options();if(value.strokes.length>=500){status("本张已有 500 笔，请清理部分区域。");return;}brush={pointerId:e.pointerId};draftStroke={mode:$("brushMode").value,radius:Number($("brushDiameter").value)/2,points:[],paperPoints:[]};addPoint(paperPoint(e));repairCanvas.setPointerCapture(e.pointerId);drawRepair();});
-  repairCanvas.addEventListener("pointermove",e=>{if(!data)return;pointer=paperPoint(e);if(brush)addPoint(pointer);drawRepair();});
+  repairCanvas.addEventListener("pointermove",e=>{if(!data)return;pointer=paperPoint(e);if(brush&&draftStroke)addPoint(pointer);drawRepair();});
   repairCanvas.addEventListener("pointerleave",()=>{pointer=null;if(!brush)drawRepair();});
   repairCanvas.addEventListener("pointerup",()=>{if(!brush || !draftStroke)return;const value=options();const {paperPoints,...stroke}=draftStroke;value.strokes.push(stroke);value.enabled=true;redo.delete(currentPhoto());brush=null;changed();status(stroke.mode==="erase"?"已排除该区域，正在更新修复。":"修复区域已加入，正在更新预览。");});
-  repairCanvas.addEventListener("pointercancel",()=>{brush=null;draftStroke=null;drawRepair();});
+  repairCanvas.addEventListener("pointercancel",()=>{cancelBrush();drawRepair();});
   repairCanvas.addEventListener("keydown",e=>{if(!(e.ctrlKey||e.metaKey))return;if(e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redoStroke():undoStroke();}else if(e.key.toLowerCase()==="y"){e.preventDefault();redoStroke();}});
   function setBusy(value){Object.keys(fields).forEach(id=>{$(id).disabled=value||!currentPhoto();});["brushMode","brushDiameter","inpaintRadius","resetRepair"].forEach(id=>{$(id).disabled=value||!currentPhoto();});renderOptions();}
   function onNewScan(){owner=null;data=null;ready=false;repairZoom=1;workspace("crop");renderOptions();}

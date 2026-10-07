@@ -14,10 +14,10 @@ shutil.copytree(Path(info["fixture"]) / "workspace", fixture)
 history = sorted((fixture / "history").glob("*.json"))
 if history:
     shutil.copy2(history[-1], fixture / "manifest.json")
-exe = root / "release/v1.0.4/InstaCrop/InstaCrop.exe"
+exe = root / "release/v1.0.5/InstaCrop/InstaCrop.exe"
 reports = []
 for mode in ("self-test", "smoke-test"):
-    report = output / f"exe-v104-{mode}.json"
+    report = output / f"exe-v105-{mode}.json"
     result = subprocess.run([str(exe), "--" + mode, str(report)],
                             env={**os.environ, "POLASCAN_DATA_DIR": str(fixture)},
                             timeout=90, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))

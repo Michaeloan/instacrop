@@ -4,7 +4,7 @@ window.Gallery=(()=>{
   const dialog=$("editDialog");
   const observer=new IntersectionObserver(entries=>entries.forEach(entry=>{if(!entry.isIntersecting)return;const img=entry.target;if(img.dataset.src){img.src=img.dataset.src;delete img.dataset.src;}observer.unobserve(img);}),{rootMargin:"350px"});
   const selections=new Set(),filters={library:{category:"all",source:"",query:"",review:false},crop:{category:"all",source:"",query:"",review:false},photo:{category:"all",source:"",query:"",review:false}};
-  let mode="library",category="all",workspaceId=null;
+  let mode="library",category="all",workspaceId=null,navigationVersion=0;
   const modeCopy={
     library:{title:"图片库",description:"按扫描原图和独立照片分类管理，再进入对应的裁剪工作区。",empty:"先把素材分类放好",help:"扫描图在「扫描裁剪」导入，独立照片在「照片调整」导入。"},
     crop:{title:"扫描裁剪",description:"导入整页扫描图，检查边缘、修复和调色，再导出成图。",empty:"把整页扫描图放进来",help:"支持多选扫描图和多页 TIFF；自动找边、分开裁剪与拉正。"},
@@ -26,9 +26,9 @@ window.Gallery=(()=>{
     if(next===mode){render();return;}
     if(dialog.open)return;
     remember();
-    mode=next;document.body.dataset.mode=mode;category=filters[mode].category;
+    ++navigationVersion;mode=next;document.body.dataset.mode=mode;category=filters[mode].category;
     $("photoSearch").value=filters[mode].query;$("onlyReview").checked=filters[mode].review;
-    $("sourceFilter").value=filters[mode].source;windowStart=0;render();
+    windowStart=0;render(filters[mode].source);
     window.scrollTo({top:0,behavior:"instant"});
   }
   function showImports(kind){
@@ -44,7 +44,7 @@ window.Gallery=(()=>{
     }
 
   }
-  function renderNavigation(){
+  function renderNavigation(restoredSource=null){
     const copy=modeCopy[mode];$("modeTitle").textContent=copy.title;$("modeDescription").textContent=copy.description;
     $("libraryCount").textContent=Workspace.state.sources.length;$("cropCount").textContent=Workspace.photos().filter(item=>item.source?.kind==="scan").length;$("photoCount").textContent=Workspace.photos().filter(item=>item.source?.kind==="photo").length;
     document.querySelectorAll(".mode-nav [data-mode]").forEach(button=>{button.classList.toggle("active",button.dataset.mode===mode);if(button.dataset.mode===mode)button.setAttribute("aria-current","page");else button.removeAttribute("aria-current");});
@@ -58,7 +58,7 @@ window.Gallery=(()=>{
     $("batchEdit").hidden=mode==="library";$("batchUndo").hidden=mode==="library";$("onlyReview").closest("label").hidden=mode==="library";
     $("homePageLabel").hidden=mode!=="crop"||!Workspace.state.pages.some(page=>Workspace.state.sources.find(source=>source.id===page.source_id)?.kind==="scan");
     $("sourceNav").replaceChildren();
-    const sources=sourcesForMode();const old=$("sourceFilter").value;
+    const sources=sourcesForMode();const old=restoredSource ?? $("sourceFilter").value;
     $("sourceFilter").replaceChildren(new Option("全部来源",""),...sources.map(source=>new Option(source.name,source.id)));
     $("sourceFilter").value=sources.some(source=>source.id===old)?old:"";$("removeSource").hidden=mode!=="library"||!$("sourceFilter").value;
     const names={scan:"扫描图",photo:"照片"};
@@ -97,13 +97,13 @@ window.Gallery=(()=>{
     const parent=$("reviewItems");parent.replaceChildren();if(mode==="library")return;
     visible().filter(item=>needsReview(item.photo)).forEach(({photo,page,source,index})=>{const row=document.createElement("button");row.className="review-item";const name=document.createElement("strong");name.textContent=`${source?.name||page.name} / 第 ${page.page} 页 / 照片 ${String(index+1).padStart(2,"0")}`;const reasons=document.createElement("span");reasons.textContent=(photo.review_reasons?.length?photo.review_reasons:!photo.inner?["缺少内部画面四角"]:photo.warnings?.length?photo.warnings:["边缘或朝向需要确认"]).join("；");row.append(name,reasons);row.onclick=()=>Workspace.run(()=>openPhoto(photo.id));parent.append(row);});
   }
-  function render(){
+  function render(restoredSource=null){
     if(Workspace.state.id&&workspaceId!==Workspace.state.id){
-      workspaceId=Workspace.state.id;selections.clear();category="all";
+      ++navigationVersion;workspaceId=Workspace.state.id;selections.clear();category="all";
       for(const key of Object.keys(filters))filters[key]={category:"all",source:"",query:"",review:false};
-      $("sourceFilter").value="";$("photoSearch").value="";$("onlyReview").checked=false;windowStart=0;
+      restoredSource="";$("sourceFilter").value="";$("photoSearch").value="";$("onlyReview").checked=false;windowStart=0;
     }
-    observer.disconnect();renderNavigation();const grid=$("galleryGrid");grid.replaceChildren();const items=visible(),sources=visibleSources();renderReview();
+    observer.disconnect();renderNavigation(restoredSource);const grid=$("galleryGrid");grid.replaceChildren();const items=visible(),sources=visibleSources();renderReview();
     const available=mode==="library"?Workspace.state.sources.length:sourcesForMode().length;
     $("welcome").hidden=available>0;$("galleryArea").hidden=!available;
     const copy=modeCopy[mode];$("welcomeTitle").textContent=copy.empty;$("welcomeDescription").textContent=copy.help;
@@ -134,7 +134,7 @@ window.Gallery=(()=>{
       const {photo,page,source,index}=item,card=document.createElement("article");card.className="photo-card"+(!photo.enabled?" unselected":"");card.dataset.photoId=photo.id;
       const stage=document.createElement("button");stage.className="photo-stage";stage.setAttribute("aria-label",`调整 ${source?.name} 照片 ${index+1}`);
       const img=document.createElement("img");img.dataset.src="/api/workspace/preview?"+new URLSearchParams({photo_id:photo.id,kind,rev:page.revision||0});img.alt=`${source?.name||page.name} · 照片 ${index+1}`;img.loading="lazy";img.decoding="async";img.onerror=()=>{stage.classList.add("preview-error");img.remove();const text=document.createElement("span");text.textContent="预览暂不可用，请打开素材检查";stage.append(text);};stage.append(img);observer.observe(img);stage.onclick=()=>Workspace.run(()=>openPhoto(photo.id));
-      const check=document.createElement("input");check.type="checkbox";check.checked=photo.enabled;check.className="photo-select";check.setAttribute("aria-label",`选择照片 ${index+1}`);check.onchange=()=>{check.disabled=true;Workspace.run(()=>Workspace.select([photo.id],check.checked));};
+      const check=document.createElement("input");check.type="checkbox";check.checked=photo.enabled;check.className="photo-select";check.setAttribute("aria-label",`选择照片 ${index+1}`);check.onchange=()=>{const enabled=check.checked;check.disabled=true;Workspace.run(async()=>{try{await Workspace.select([photo.id],enabled);}finally{check.disabled=false;check.checked=Workspace.photos().find(item=>item.photo.id===photo.id)?.photo.enabled ?? photo.enabled;}});};
       const footer=document.createElement("div");footer.className="photo-footer";const title=document.createElement("span");title.textContent=`照片 ${index+1}`;const adjust=document.createElement("button");adjust.className="adjust-button";adjust.textContent="调整裁剪";adjust.onclick=stage.onclick;footer.append(title,adjust);
       const sourceName=document.createElement("p");sourceName.className="photo-origin";sourceName.textContent=`${source?.name||page.name} · ${source?.kind==="scan"?`第 ${page.page} 页` : "导入照片"}`;sourceName.title=sourceName.textContent;
       card.append(stage,check,footer,sourceName);
@@ -154,11 +154,13 @@ window.Gallery=(()=>{
   }
 
   async function openPhoto(photoId){
-    if(opening||busy)return;opening=true;
+    if(opening||busy||dialog.open)return;opening=true;
     try{
       const item=Workspace.photos().find(item=>item.photo.id===photoId);if(!item)throw new Error("照片已移除，请重新选择。");
       setMode(item.source?.kind==="scan"?"crop":"photo");
-      await Workspace.activate(item.page.id);const index=scan.photos.findIndex(photo=>photo.id===photoId);if(index<0)throw new Error("照片已更新，请重新选择。");
+      const navigation=navigationVersion;
+      const loaded=await Workspace.activate(item.page.id,()=>navigation===navigationVersion);if(!loaded||navigation!==navigationVersion)return;
+      const index=scan.photos.findIndex(photo=>photo.id===photoId);if(index<0)throw new Error("照片已更新，请重新选择。");
       open(index);
     }finally{opening=false;}
   }
@@ -168,6 +170,13 @@ window.Gallery=(()=>{
     handle=null;drawing=null;draft=[];$("dialogTitle").textContent=scan.photos[index]?`${scan.name} · 调整照片 ${index+1}`:"补一张照片";
     $("trim").value=scan.photos[index]?.presentation?.trim||0;$("occupancy").value=Math.round((scan.photos[index]?.presentation?.occupancy||.78)*100);
     dialog.showModal();document.body.classList.add("editing");renderList();renderEditor();tab("crop");schedulePreview();
+  }
+  async function openPage(pageId,manual=false){
+    if(!pageId||opening||busy||dialog.open)return;opening=true;const navigation=navigationVersion;
+    try{
+      const loaded=await Workspace.activate(pageId,()=>navigation===navigationVersion);if(!loaded||navigation!==navigationVersion)return;open(0);
+      if(manual){drawing="outer";draft=[];tab("crop");draw();canvas.focus();status("在扫描图上依次点选四角。");}
+    }finally{opening=false;}
   }
   async function done(){
     if(busy)return;drawing=null;draft=[];setBusy(true);$("editorDone").textContent="正在保存";
@@ -179,9 +188,9 @@ window.Gallery=(()=>{
   $("editorDone").onclick=done;$("cancelEdit").onclick=cancel;dialog.addEventListener("cancel",event=>{event.preventDefault();cancel();});
   $("stepCrop").onclick=()=>tab("crop");$("stepRepair").onclick=()=>tab("repair");$("stepExport").onclick=()=>tab("color");
   document.querySelectorAll("[data-view]").forEach(button=>{button.onclick=()=>{kind=button.dataset.view;document.querySelectorAll("[data-view]").forEach(item=>{item.classList.toggle("active",item===button);item.setAttribute("aria-pressed",String(item===button));});render();};});
-  $("manualAdd").onclick=()=>Workspace.run(async()=>{const pageId=$("homePage").value || Workspace.state.pages[0]?.id;if(!pageId)return;await Workspace.activate(pageId);open(Math.max(0,selected));drawing="outer";draft=[];tab("crop");draw();canvas.focus();status("在扫描图上依次点选四角。");});
+  $("manualAdd").onclick=()=>Workspace.run(()=>openPage($("homePage").value,true));
   $("emptyManual").onclick=()=>$("manualAdd").click();
-  $("homePage").onchange=()=>Workspace.run(async()=>{await Workspace.activate($("homePage").value);open(0);});
+  $("homePage").onchange=()=>Workspace.run(()=>openPage($("homePage").value));
   $("page").onchange=()=>Workspace.run(async()=>{if(dialog.open)throw new Error("请先完成当前页调整，再从来源菜单切换页面。");});
   $("trim").oninput=()=>{const photo=currentPhoto();if(photo){photo.presentation={...photo.presentation,trim:Number($("trim").value)};changed();}};
   $("occupancy").oninput=()=>{const photo=currentPhoto();if(photo){photo.presentation={...photo.presentation,occupancy:Number($("occupancy").value)/100};$("occupancyValue").textContent=$("occupancy").value+"%";changed();}};

@@ -122,9 +122,13 @@ class WorkService:
         return {"artifact_id": artifact_id, "filename": Path(path).name, "report": report or {}}
 
     def save(self, kind, data, destination=None):
-        ids = data.get("photo_ids") or None
+        if not isinstance(data, dict) or set(data) - {"photo_ids", "zip_output"}:
+            raise ValueError("保存参数包含未支持的字段；输出路径仅由原生对话框提供")
+        ids = data.get("photo_ids")
         if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
             raise ValueError("照片选择格式错误")
+        if kind != "project" and ids == []:
+            raise ValueError("请先选择要导出的照片")
         if kind not in ("project", "export", "folder"):
             raise ValueError("未知保存类型")
         internal = destination is None
@@ -228,8 +232,8 @@ def send_file(handler, path, download=False):
         handler.send_header("Content-Range", f"bytes {start}-{end}/{size}")
     if download:
         handler.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + urllib.parse.quote(path.name))
-    handler.end_headers()
     try:
+        handler.end_headers()
         with path.open("rb") as source:
             source.seek(start)
             remaining = end - start + 1
@@ -239,5 +243,5 @@ def send_file(handler, path, download=False):
                     break
                 handler.wfile.write(chunk)
                 remaining -= len(chunk)
-    except (BrokenPipeError, ConnectionResetError):
+    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
         pass

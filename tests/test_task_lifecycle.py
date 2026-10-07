@@ -1,4 +1,4 @@
-from concurrent.futures import Future
+from concurrent.futures import CancelledError, Future
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import json
@@ -23,6 +23,44 @@ def settled(queue, task_id):
 
 
 class TaskLifecycleTests(unittest.TestCase):
+    def test_closed_queue_rejects_submission_without_recording_ghost_task(self):
+        with TemporaryDirectory() as folder:
+            queue = TaskQueue(folder)
+            queue.close()
+            with self.assertRaisesRegex(ValueError, "已关闭"):
+                queue.start("import", [1], lambda *args: {})
+            self.assertEqual(queue.snapshot(), [])
+            self.assertEqual(json.loads(queue.path.read_text(encoding="utf-8")), {})
+
+    def test_failed_submission_rolls_back_queued_record(self):
+        with TemporaryDirectory() as folder:
+            queue = TaskQueue(folder)
+            try:
+                with patch.object(queue.executors["local"], "submit", side_effect=RuntimeError("cannot start thread")):
+                    with self.assertRaisesRegex(RuntimeError, "cannot start"):
+                        queue.start("import", [1], lambda *args: {})
+                self.assertEqual(queue.tasks, {})
+                self.assertEqual(queue.controls, {})
+                self.assertEqual(queue.workers, {})
+                self.assertEqual(json.loads(queue.path.read_text(encoding="utf-8")), {})
+            finally:
+                queue.close()
+
+    def test_cancel_race_during_snapshot_is_reported_as_cancelled(self):
+        with TemporaryDirectory() as folder:
+            queue = TaskQueue(folder)
+            future = Mock()
+            future.cancelled.return_value = False
+            future.done.return_value = True
+            future.exception.side_effect = CancelledError()
+            queue.tasks["race"] = {"id": "race", "kind": "import", "state": "queued"}
+            queue.futures["race"] = future
+            try:
+                self.assertEqual(queue.snapshot()[0]["state"], "cancelled")
+                self.assertEqual(queue.active_tasks(), [])
+            finally:
+                queue.close()
+
     def test_finishing_between_snapshot_and_cancel_does_not_abort_new_batch(self):
         with TemporaryDirectory() as folder:
             queue = TaskQueue(folder)
