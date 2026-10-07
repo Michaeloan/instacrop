@@ -57,7 +57,7 @@ class TaskLifecycleTests(unittest.TestCase):
                 self.assertEqual(task["state"], "interrupted")
                 self.assertEqual(task["results"], [{"item": 1}])
                 self.assertEqual(queue.run_when_idle(lambda: "new batch"), "new batch")
-                self.assertEqual(json.loads(queue.path.read_text())["orphan"]["state"], "interrupted")
+                self.assertEqual(json.loads(queue.path.read_text(encoding="utf-8"))["orphan"]["state"], "interrupted")
             finally:
                 queue.close()
 
